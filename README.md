@@ -147,8 +147,8 @@ does everything without editing files by hand:
   toggle between character-by-character and whole-phrase reading.
 - **Autostart & watchdog** — optional start-at-logon (tray) and auto-restart of the reader
   if it stops (rate-limited).
-- **Single instance** — a second launch activates the existing window instead of adding a
-  duplicate tray icon / hotkey.
+- **Single instance** — a second launch shows a notice and exits, so you never end up with
+  a duplicate tray icon or a hotkey conflict.
 - **About / version** — version, install paths and current hotkey.
 
 Headless:

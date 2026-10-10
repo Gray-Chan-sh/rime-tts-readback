@@ -335,7 +335,7 @@ namespace RimeHK {
         public HotKeyWindow() {
             var cp = new CreateParams();
             cp.Caption = "RimeTtsReadbackHotKey";
-            cp.Parent = new IntPtr(-3);   // message-only window
+            cp.Parent = IntPtr.Zero;   // normal (never shown) top-level window so FindWindow can locate it
             this.CreateHandle(cp);
         }
         public bool Register(int id, int mods, int vk) { return RegisterHotKey(this.Handle, id, mods, vk); }
@@ -351,18 +351,14 @@ namespace RimeHK {
 '@ -ReferencedAssemblies 'System.Windows.Forms'
 }
 
-# single instance: the first instance owns the mutex; later ones poke the IPC window and exit
+# single instance: the first instance owns the mutex; a later launch informs and exits.
 if (-not ($Check -or $Smoke)) {
     $script:Mutex = New-Object System.Threading.Mutex($false, 'Local\RimeTtsReadback.Gui')
     $first = $false
     try { $first = $script:Mutex.WaitOne(0) } catch { $first = $true }
     if (-not $first) {
-        try {
-            $hwnd = [RimeHK.HotKeyWindow]::FindWindow($null, 'RimeTtsReadbackHotKey')
-            if ($hwnd -ne [IntPtr]::Zero) {
-                [void][RimeHK.HotKeyWindow]::PostMessage($hwnd, [RimeHK.HotKeyWindow]::WM_SHOW, [IntPtr]::Zero, [IntPtr]::Zero)
-            }
-        } catch { }
+        [void][System.Windows.Forms.MessageBox]::Show(
+            'Rime TTS Readback 已在运行（见右下角通知栏图标）。', 'Rime TTS Readback', 'OK', 'Information')
         exit 0
     }
 }
@@ -861,7 +857,6 @@ function Toggle-Readback {
 }
 
 $script:HkWnd.Add_HotKeyPressed({ param($id) if ($id -eq $script:HKId) { Toggle-Readback } })
-$script:HkWnd.Add_ShowRequested({ Show-Main })
 
 # ---------------------------------------------------------------- watchdog
 $script:WatchCount = 0
