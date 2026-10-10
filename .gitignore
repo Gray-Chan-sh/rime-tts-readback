@@ -1,0 +1,12 @@
+# runtime artefacts (never commit these)
+*.log
+*.wav
+Rime_tts_queue/
+Rime_tts_off
+
+# Windows / editor noise
+Thumbs.db
+desktop.ini
+*.tmp
+.vscode/
+.idea/

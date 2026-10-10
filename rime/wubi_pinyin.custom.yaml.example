@@ -1,0 +1,6 @@
+# 五笔·拼音 个人定制
+patch:
+  translator/enable_sentence: false   # 关闭整句联想
+  translator/enable_user_dict: true   # 保留自造词
+  engine/processors/+:
+    - lua_processor@tts_reporter      # 上屏文字写入队列（见 rime.lua）
