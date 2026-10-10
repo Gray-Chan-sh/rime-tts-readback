@@ -397,7 +397,7 @@ $gbParams.Text = '参数'
 $gbParams.SetBounds(10, 246, 760, 320)
 $form.Controls.Add($gbParams)
 
-function New-ParamLabel([string]$t, [int]$x, [int]$y, [int]$w = 150) {
+function New-ParamLabel([string]$t, [int]$x, [int]$y, [int]$w = 132) {
     $l = New-Object System.Windows.Forms.Label
     $l.Text = $t
     $l.SetBounds($x, $y, $w, 20)
@@ -406,9 +406,9 @@ function New-ParamLabel([string]$t, [int]$x, [int]$y, [int]$w = 150) {
 
 $cbVoice = New-Object System.Windows.Forms.ComboBox
 $cbVoice.DropDownStyle = 'DropDownList'
-$cbVoice.SetBounds(130, 24, 320, 24)
+$cbVoice.SetBounds(158, 24, 288, 24)
 $gbParams.Controls.Add($cbVoice)
-New-ParamLabel '语音 (Voice)' 16 28
+New-ParamLabel '语音' 16 28
 $btnTest = New-Object System.Windows.Forms.Button
 $btnTest.Text = '试听'
 $btnTest.SetBounds(460, 23, 70, 26)
@@ -421,25 +421,35 @@ $gbParams.Controls.Add($lblVoiceHint)
 function New-Num([string]$cap, [int]$y, [int]$min, [int]$max, [int]$def) {
     New-ParamLabel $cap 16 $y
     $n = New-Object System.Windows.Forms.NumericUpDown
-    $n.SetBounds(130, $y - 3, 90, 24)
+    $n.SetBounds(158, $y - 3, 90, 24)
     $n.Minimum = $min
     $n.Maximum = $max
     $n.Value = $def
     $gbParams.Controls.Add($n)
     return $n
 }
-$numRate     = New-Num '语速 Rate (-10..10)'        62  (-10) 10  0
-$numBreak    = New-Num '字间停顿 BreakMs (ms)'      96    0  1000 30
-$numIdle     = New-Num '触发间隔 IdleMs (ms)'      130    0  2000 60
-$numMaxWait  = New-Num '最长等待 MaxWaitMs (ms)'   164    0  3000 200
-$numThresh   = New-Num '静音阈值 Threshold'        198    0  3000 180
-$numPad      = New-Num '边距 PadMs (ms)'           232    0   300 15
+$numRate     = New-Num '语速 Rate'        62  (-10) 10  0
+$numBreak    = New-Num '字间停顿 BreakMs' 96    0  1000 30
+$numIdle     = New-Num '触发间隔 IdleMs' 130    0  2000 60
+$numMaxWait  = New-Num '最长等待 MaxWait' 164    0  3000 200
+$numThresh   = New-Num '静音阈值'         198    0  3000 180
+$numPad      = New-Num '边距 PadMs'       232    0   300 15
+
+$tip = New-Object System.Windows.Forms.ToolTip
+$tip.SetToolTip($cbVoice,     '朗读使用的系统语音')
+$tip.SetToolTip($numRate,     '语速 -10..10；越小每个字读得越长越清晰')
+$tip.SetToolTip($numBreak,    '每个字之间插入的停顿（毫秒）')
+$tip.SetToolTip($numIdle,     '上屏后等待多久算一段；越小越灵敏')
+$tip.SetToolTip($numMaxWait,  '最长等待（毫秒），超过就立即朗读')
+$tip.SetToolTip($numThresh,   '静音判定阈值（16 位采样），一般不用改')
+$tip.SetToolTip($numPad,      '裁剪静音时保留的边距（毫秒）')
 
 $chkAscii = New-Object System.Windows.Forms.CheckBox
 $chkAscii.Text = '朗读英文与数字 (IncludeAscii)'
 $chkAscii.SetBounds(16, 266, 300, 22)
 $chkAscii.Checked = $true
 $gbParams.Controls.Add($chkAscii)
+$tip.SetToolTip($chkAscii, '勾选后英文与数字也会朗读（受输入法是否上屏限制）')
 
 $btnSave      = New-Object System.Windows.Forms.Button
 $btnSave.Text = '保存参数'
