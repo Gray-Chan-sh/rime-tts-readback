@@ -514,6 +514,21 @@ $tip.ReshowDelay = 100
 
 $lblFont = New-Object System.Drawing.Font('Microsoft YaHei UI', 9, [System.Drawing.FontStyle]::Bold)
 
+# ---- "About" button lives in the header (top-right), out of the action row
+$btnAbout = New-Object System.Windows.Forms.Button
+$btnAbout.Text = '关于'
+$btnAbout.SetBounds(686, 17, 76, 30)
+$btnAbout.FlatStyle = 'Flat'
+$btnAbout.UseVisualStyleBackColor = $false
+$btnAbout.BackColor = [System.Drawing.Color]::FromArgb(46, 120, 190)
+$btnAbout.ForeColor = [System.Drawing.Color]::White
+$btnAbout.FlatAppearance.BorderSize = 1
+$btnAbout.FlatAppearance.BorderColor = [System.Drawing.Color]::FromArgb(122, 176, 226)
+$btnAbout.FlatAppearance.MouseOverBackColor = [System.Drawing.Color]::FromArgb(70, 140, 205)
+$btnAbout.FlatAppearance.MouseDownBackColor = [System.Drawing.Color]::FromArgb(38, 105, 168)
+$header.Controls.Add($btnAbout)
+$tip.SetToolTip($btnAbout, '显示版本、安装位置与快捷键信息。')
+
 # ---- status group
 $gbStatus = New-Object System.Windows.Forms.GroupBox
 $gbStatus.Text = '状态'
@@ -589,8 +604,7 @@ $btnInstall  = New-Btn '部署到 Rime'   14 128 '安装 rime.lua 与朗读脚�
 $btnToggle   = New-Btn '启用 / 禁用'   150 176 '切换回读开关：已启用时点击=禁用（静音并停止后台）；已禁用时点击=启用（取消静音并启动后台）。'
 $btnRemove   = New-Btn '删除回读功能'  334 128 '从 Rime 移除所有回读补丁与 rime.lua，并重新部署（会先二次确认）。'
 $btnRedeploy = New-Btn '仅重新部署'    470 108 '只调用 Rime 的重新部署，不改动任何配置。'
-$btnAbout    = New-Btn '关于'          586 84  '显示版本、安装位置与快捷键信息。'
-$btnHelp     = New-Btn '一键安装'      678 68  '一键完成：部署到 Rime + 启用 + 按需设置开机自启。' -Primary
+$btnHelp     = New-Btn '一键安装'      586 160 '一键完成：部署到 Rime + 启用 + 按需设置开机自启。' -Primary
 
 # ---- parameters group
 $gbParams = New-Object System.Windows.Forms.GroupBox
