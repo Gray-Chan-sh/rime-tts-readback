@@ -123,6 +123,12 @@ does everything without editing files by hand:
 - **Parameters** — voice (picked from the installed SAPI voices, with a preview button),
   `Rate`, `BreakMs`, `IdleMs`, `MaxWaitMs`, `Threshold`, `PadMs`, `IncludeAscii`, saved to
   `%USERPROFILE%\Rime_tts_config.json`, which the reader loads on startup.
+- **Tray icon** — a colour-coded dot in the notification area shows whether readback is
+  available (green = available, orange = not ready, grey = disabled / not installed).
+  Minimizing or closing the window hides it to the tray; click the icon to restore,
+  right-click for 显示窗口 / 启用 / 禁用 / 退出.
+- **Global hotkey** — `Ctrl+Alt+R` toggles readback on/off system-wide (configurable in the
+  panel: `Ctrl`/`Alt`/`Shift`/`Win` + `A-Z`, `0-9`, `F1-F12`, `Space`).
 
 Headless:
 

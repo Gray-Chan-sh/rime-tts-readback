@@ -336,7 +336,7 @@ Add-Type -AssemblyName System.Drawing
 
 $form = New-Object System.Windows.Forms.Form
 $form.Text = 'Rime TTS Readback 控制面板'
-$form.ClientSize = New-Object System.Drawing.Size(780, 800)
+$form.ClientSize = New-Object System.Drawing.Size(780, 880)
 $form.StartPosition = 'CenterScreen'
 $form.Font = New-Object System.Drawing.Font('Microsoft YaHei UI', 9)
 $form.FormBorderStyle = 'FixedSingle'
@@ -460,10 +460,41 @@ $btnApply.Text = '保存并重启朗读'
 $btnApply.SetBounds(600, 262, 140, 30)
 $gbParams.Controls.Add($btnApply)
 
+# ---- global hotkey group
+$gbHot = New-Object System.Windows.Forms.GroupBox
+$gbHot.Text = '全局快捷键'
+$gbHot.SetBounds(10, 574, 760, 72)
+$form.Controls.Add($gbHot)
+
+$lblHot = New-Object System.Windows.Forms.Label
+$lblHot.Text = '切换快捷键:'
+$lblHot.SetBounds(16, 28, 92, 20)
+$gbHot.Controls.Add($lblHot)
+
+$txtHot = New-Object System.Windows.Forms.TextBox
+$txtHot.SetBounds(112, 25, 150, 24)
+$txtHot.Text = 'Ctrl+Alt+R'
+$gbHot.Controls.Add($txtHot)
+
+$chkHot = New-Object System.Windows.Forms.CheckBox
+$chkHot.Text = '启用全局快捷键'
+$chkHot.SetBounds(276, 27, 130, 22)
+$chkHot.Checked = $true
+$gbHot.Controls.Add($chkHot)
+
+$btnHotApply = New-Object System.Windows.Forms.Button
+$btnHotApply.Text = '应用'
+$btnHotApply.SetBounds(414, 24, 84, 28)
+$gbHot.Controls.Add($btnHotApply)
+
+$lblHotStatus = New-Object System.Windows.Forms.Label
+$lblHotStatus.SetBounds(508, 29, 240, 20)
+$gbHot.Controls.Add($lblHotStatus)
+
 # ---- log group
 $gbLog = New-Object System.Windows.Forms.GroupBox
 $gbLog.Text = '日志'
-$gbLog.SetBounds(10, 574, 760, 216)
+$gbLog.SetBounds(10, 654, 760, 216)
 $form.Controls.Add($gbLog)
 $txtLog = New-Object System.Windows.Forms.TextBox
 $txtLog.Multiline = $true
@@ -529,6 +560,8 @@ function Load-ConfigIntoUi {
         if ($null -ne $cfg.Threshold) { $numThresh.Value  = [int]$cfg.Threshold }
         if ($null -ne $cfg.PadMs)     { $numPad.Value     = [int]$cfg.PadMs }
         if ($null -ne $cfg.IncludeAscii) { $chkAscii.Checked = [bool]$cfg.IncludeAscii }
+        if ($cfg.HotKey) { $txtHot.Text = [string]$cfg.HotKey }
+        if ($null -ne $cfg.HotKeyEnabled) { $chkHot.Checked = [bool]$cfg.HotKeyEnabled }
     }
     if (-not $cbVoice.SelectedItem -and $cbVoice.Items.Count -gt 0) {
         $pref = $voices | Where-Object { $_ -match 'Huihui|Chinese|zh' } | Select-Object -First 1
@@ -546,6 +579,8 @@ function Collect-Config {
         Threshold    = [int]$numThresh.Value
         PadMs        = [int]$numPad.Value
         IncludeAscii = [bool]$chkAscii.Checked
+        HotKey       = [string]$txtHot.Text
+        HotKeyEnabled = [bool]$chkHot.Checked
     }
 }
 
@@ -649,6 +684,9 @@ $miDisable.Add_Click({ Run-Action '禁用回读（通知栏）' { Disable-Readba
 $miExit.Add_Click({
     $script:ReallyExit = $true
     $timer.Stop()
+    try {
+        if ($script:HkWnd) { $script:HkWnd.Unregister($script:HKId); $script:HkWnd.Dispose() }
+    } catch { }
     $notify.Visible = $false
     $notify.Dispose()
     $form.Close()
@@ -669,6 +707,89 @@ $timer = New-Object System.Windows.Forms.Timer
 $timer.Interval = 2000
 $timer.Add_Tick({ Update-Tray })
 $timer.Start()
+
+# ---------------------------------------------------------------- global hotkey
+$script:HKId  = 0xB001
+$script:HkWnd = $null
+
+if (-not ('RimeHK.HotKeyWindow' -as [type])) {
+    Add-Type -TypeDefinition @'
+using System;
+using System.Windows.Forms;
+using System.Runtime.InteropServices;
+namespace RimeHK {
+    public class HotKeyWindow : NativeWindow, IDisposable {
+        private const int WM_HOTKEY = 0x0312;
+        [DllImport("user32.dll")] public static extern bool RegisterHotKey(IntPtr hWnd, int id, int fsModifiers, int vk);
+        [DllImport("user32.dll")] public static extern bool UnregisterHotKey(IntPtr hWnd, int id);
+        public event Action<int> HotKeyPressed;
+        public HotKeyWindow() {
+            var cp = new CreateParams();
+            cp.Caption = "RimeTtsReadbackHotKey";
+            cp.Parent = new IntPtr(-3);   // message-only window
+            this.CreateHandle(cp);
+        }
+        public bool Register(int id, int mods, int vk) { return RegisterHotKey(this.Handle, id, mods, vk); }
+        public void Unregister(int id) { UnregisterHotKey(this.Handle, id); }
+        protected override void WndProc(ref Message m) {
+            if (m.Msg == WM_HOTKEY) {
+                var h = HotKeyPressed;
+                if (h != null) h(m.WParam.ToInt32());
+            }
+            base.WndProc(ref m);
+        }
+        public void Dispose() { if (this.Handle != IntPtr.Zero) this.DestroyHandle(); }
+    }
+}
+'@ -ReferencedAssemblies 'System.Windows.Forms'
+}
+
+function Convert-HotKey([string]$spec) {
+    if (-not $spec) { return $null }
+    $mods = 0; $vk = -1
+    foreach ($p in ($spec -split '\s*\+\s*')) {
+        $u = $p.Trim().ToUpperInvariant()
+        switch ($u) {
+            'CTRL'    { $mods = $mods -bor 0x2 }
+            'CONTROL' { $mods = $mods -bor 0x2 }
+            'ALT'     { $mods = $mods -bor 0x1 }
+            'SHIFT'   { $mods = $mods -bor 0x4 }
+            'WIN'     { $mods = $mods -bor 0x8 }
+            default {
+                if     ($u -match '^F([1-9]|1[0-2])$') { $vk = 0x70 + [int]$Matches[1] - 1 }
+                elseif ($u -match '^[A-Z0-9]$')        { $vk = [int][char]$u }
+                elseif ($u -eq 'SPACE')                { $vk = 0x20 }
+                else { return $null }
+            }
+        }
+    }
+    if ($vk -lt 0 -or $mods -eq 0) { return $null }
+    return @{ Mods = ($mods -bor 0x4000); Vk = $vk }   # MOD_NOREPEAT
+}
+
+function Apply-HotKey([string]$spec, [bool]$enabled) {
+    if (-not $script:HkWnd) {
+        $script:HkWnd = New-Object RimeHK.HotKeyWindow
+        $script:HkWnd.Add_HotKeyPressed({ param($id) if ($id -eq $script:HKId) { Toggle-Readback } })
+    }
+    try { $script:HkWnd.Unregister($script:HKId) } catch { }
+    if (-not $enabled) { return @{ Ok = $true; Msg = '已关闭全局快捷键' } }
+    $r = Convert-HotKey $spec
+    if (-not $r) { return @{ Ok = $false; Msg = "格式无效: $spec" } }
+    if ($script:HkWnd.Register($script:HKId, $r.Mods, $r.Vk)) { return @{ Ok = $true; Msg = "已注册: $spec" } }
+    return @{ Ok = $false; Msg = "注册失败（可能被占用）: $spec" }
+}
+
+function Toggle-Readback {
+    $st = Get-FeatureState
+    if ($st.Muted) {
+        Run-Action '启用回读（快捷键）' { Enable-Readback }
+        try { $notify.ShowBalloonTip(800, 'Rime 回读', '已启用', [System.Windows.Forms.ToolTipIcon]::Info) } catch { }
+    } else {
+        Run-Action '禁用回读（快捷键）' { Disable-Readback }
+        try { $notify.ShowBalloonTip(800, 'Rime 回读', '已禁用', [System.Windows.Forms.ToolTipIcon]::Info) } catch { }
+    }
+}
 
 # ---------------------------------------------------------------- wiring
 $btnRefresh.Add_Click({ Refresh-View; Log-Line '已刷新检测' })
@@ -710,10 +831,24 @@ $btnTest.Add_Click({
     } catch { Log-Line "试听失败: $($_.Exception.Message)" }
 })
 
+$btnHotApply.Add_Click({
+    try {
+        $r = Apply-HotKey $txtHot.Text ([bool]$chkHot.Checked)
+        $lblHotStatus.Text = $r.Msg
+        $lblHotStatus.ForeColor = if ($r.Ok) { [System.Drawing.Color]::FromArgb(0, 110, 0) } else { [System.Drawing.Color]::FromArgb(170, 0, 0) }
+        Log-Line "全局快捷键: $($r.Msg)"
+        Write-Config (Collect-Config)
+    } catch { Log-Line "快捷键设置失败: $($_.Exception.Message)" }
+})
+
 $form.Add_Shown({
     Load-ConfigIntoUi
     Refresh-View
     Update-Tray
+    $r = Apply-HotKey $txtHot.Text ([bool]$chkHot.Checked)
+    $lblHotStatus.Text = $r.Msg
+    $lblHotStatus.ForeColor = if ($r.Ok) { [System.Drawing.Color]::FromArgb(0, 110, 0) } else { [System.Drawing.Color]::FromArgb(170, 0, 0) }
+    Log-Line "全局快捷键: $($r.Msg)"
     Log-Line 'Rime TTS Readback 控制面板已就绪（最小化/关闭窗口会缩到通知栏）'
 })
 
@@ -722,8 +857,10 @@ if ($Smoke) {
     Load-ConfigIntoUi
     Refresh-View
     Update-Tray
-    Write-Output 'smoke ok: form constructed, controls loaded, tray state refreshed'
+    $hk = Apply-HotKey $txtHot.Text ([bool]$chkHot.Checked)
+    Write-Output ("smoke ok: form constructed, controls loaded, tray refreshed; hotkey " + $hk.Msg)
     $timer.Stop()
+    try { if ($script:HkWnd) { $script:HkWnd.Unregister($script:HKId); $script:HkWnd.Dispose() } } catch { }
     $notify.Visible = $false
     $notify.Dispose()
     $form.Dispose()
