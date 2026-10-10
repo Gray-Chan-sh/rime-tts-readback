@@ -197,7 +197,10 @@ rime-tts-readback/
 │  ├─ rime-tts-readback.ico             # app icon (sound waves + keyboard)
 │  ├─ tray-ok.ico / tray-warn.ico / tray-off.ico
 ├─ tools/
-│  └─ make-icons.ps1                    # regenerates icons/ (GDI+, multi-size DIB)
+│  ├─ make-icons.ps1                    # regenerates icons/ (GDI+, multi-size DIB)
+│  ├─ build-release.ps1                 # portable zip  -> dist/rime-tts-readback-<v>.zip
+│  └─ build-exe.ps1                     # single-file exe -> dist/RimeTtsReadback-<v>.exe
+├─ .github/workflows/build.yml          # CI: builds zip + exe, publishes release assets
 ├─ install.ps1
 └─ uninstall.ps1
 ```
@@ -213,6 +216,22 @@ rime-tts-readback/
 - The design deliberately never spawns a process from inside the input method. An early
   version used `os.execute()` in the commit handler; that blocks the IME thread and can
   freeze the whole desktop. Do not put anything blocking in the Lua path.
+
+## Build & release
+
+```
+powershell -ExecutionPolicy Bypass -File tools\build-release.ps1   # dist\rime-tts-readback-<v>.zip
+powershell -ExecutionPolicy Bypass -File tools\build-exe.ps1       # dist\RimeTtsReadback-<v>.exe
+```
+
+- `build-release.ps1` packs the whole project into a zip (portable scripts, no installer).
+- `build-exe.ps1` packs everything into a **single self-extracting .exe**, compiled with the
+  `csc.exe` that ships with Windows (no downloads). On run it extracts to
+  `%LOCALAPPDATA%\RimeTtsReadback\<version>\` (only when the version changes) and launches the
+  control panel; command-line arguments are forwarded to the GUI script.
+
+CI: `.github/workflows/build.yml` builds both on every push to `main`, uploads them as
+artifacts, and — for `v*` tags — attaches them to the GitHub release.
 
 ## License
 
