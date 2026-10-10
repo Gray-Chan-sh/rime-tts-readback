@@ -198,7 +198,7 @@ function Trim-Silence([byte[]]$bytes, [int]$volume) {
   return ,([byte[]]$ms.ToArray())
 }
 
-function Speak-Now([string]$readable) {
+function Speak-Now([string]$readable, [string]$proc) {
   $t0 = [DateTime]::UtcNow
   try {
     $synth.SetOutputToWaveFile($RawWav)
@@ -212,7 +212,7 @@ function Speak-Now([string]$readable) {
   $player = New-Object System.Media.SoundPlayer $OutWav
   try { $player.PlaySync() } catch { Log ("play error: " + $_) }
   $t2 = [DateTime]::UtcNow
-  Log ("read [" + $readable + "] synth=" + [int](($t1-$t0).TotalMilliseconds) +
+  Log ("read [" + $readable + "] proc=[" + $proc + "] synth=" + [int](($t1-$t0).TotalMilliseconds) +
        "ms play=" + [int](($t2-$t1).TotalMilliseconds) + "ms")
 }
 
@@ -288,7 +288,7 @@ while ($true) {
       Log ("skip (app filter '$AppFilterMode') proc=[" + $procNow + "] text=[" + $readable + "]")
       continue
     }
-    Speak-Now $readable
+    Speak-Now $readable $procNow
   } else {
     Start-Sleep -Milliseconds 20
   }
