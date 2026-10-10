@@ -133,19 +133,37 @@ function Get-VisibleApps {
                'WindowsInternal.ComposableShell.Experiences.TextInput.InputApp')
     $map = @{}
     foreach ($r in $rows) {
-        $parts = $r -split "`t", 2
-        if ($parts.Count -lt 2) { continue }
+        $parts = $r -split "`t", 3
+        if ($parts.Count -lt 3) { continue }
         $procId = 0
         [void][int]::TryParse($parts[0], [ref]$procId)
         if ($procId -le 0) { continue }
         $pname = (Get-Process -Id $procId -ErrorAction SilentlyContinue).ProcessName
         if (-not $pname) { continue }
         if ($noise -contains $pname) { continue }
-        if (-not $map.ContainsKey($pname)) { $map[$pname] = $parts[1] }
+        if (-not $map.ContainsKey($pname)) {
+            $hv = [int64]0
+            [void][int64]::TryParse($parts[1], [ref]$hv)
+            $map[$pname] = [PSCustomObject]@{ Title = $parts[2]; Hwnd = [IntPtr]$hv }
+        }
     }
     return @($map.GetEnumerator() | Sort-Object Name | ForEach-Object {
-        [PSCustomObject]@{ Name = $_.Key; Title = $_.Value }
+        [PSCustomObject]@{ Name = $_.Key; Title = $_.Value.Title; Hwnd = $_.Value.Hwnd }
     })
+}
+
+function Get-AppIcon([IntPtr]$hwnd, [string]$procName) {
+    if ($hwnd -ne [IntPtr]::Zero) {
+        try {
+            $hicon = [RimeHK.WinEnum]::WindowIcon($hwnd)
+            if ($hicon -ne [IntPtr]::Zero) { return ([System.Drawing.Icon]::FromHandle($hicon)).ToBitmap() }
+        } catch { }
+    }
+    try {
+        $p = Get-Process -Name $procName -ErrorAction SilentlyContinue | Where-Object { $_.Path } | Select-Object -First 1
+        if ($p -and $p.Path) { return ([System.Drawing.Icon]::ExtractAssociatedIcon($p.Path)).ToBitmap() }
+    } catch { }
+    return $null
 }
 
 function Invoke-Redeploy {
@@ -379,8 +397,9 @@ namespace RimeHK {
         [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetWindowTextLength(IntPtr h);
         [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
         [DllImport("user32.dll")] private static extern int GetWindowLong(IntPtr h, int idx);
+        [DllImport("user32.dll")] private static extern IntPtr SendMessage(IntPtr h, int msg, IntPtr w, IntPtr l);
         private delegate bool EnumProc(IntPtr h, IntPtr l);
-        // returns "pid\twindow title" for every visible, titled, non-tool top-level window
+        // returns "pid\thwnd\ttitle" for every visible, titled, non-tool top-level window
         public static System.Collections.Generic.List<string> Visible() {
             var list = new System.Collections.Generic.List<string>();
             EnumWindows(delegate(IntPtr h, IntPtr l) {
@@ -390,10 +409,17 @@ namespace RimeHK {
                 uint pid; GetWindowThreadProcessId(h, out pid);
                 var sb = new System.Text.StringBuilder(512);
                 GetWindowText(h, sb, sb.Capacity);
-                list.Add(pid.ToString() + "\t" + sb.ToString());
+                list.Add(pid.ToString() + "\t" + h.ToInt64().ToString() + "\t" + sb.ToString());
                 return true;
             }, IntPtr.Zero);
             return list;
+        }
+        // best-effort window icon (WM_GETICON small2 / small / big)
+        public static IntPtr WindowIcon(IntPtr hwnd) {
+            IntPtr h = SendMessage(hwnd, 0x007F, new IntPtr(2), IntPtr.Zero);
+            if (h == IntPtr.Zero) h = SendMessage(hwnd, 0x007F, new IntPtr(0), IntPtr.Zero);
+            if (h == IntPtr.Zero) h = SendMessage(hwnd, 0x007F, new IntPtr(1), IntPtr.Zero);
+            return h;
         }
     }
 }
@@ -1102,47 +1128,65 @@ $btnPickProc.Add_Click({
 
     $dlg = New-Object System.Windows.Forms.Form
     $dlg.Text = '选择程序（只列出有可见窗口的程序）'
-    $dlg.ClientSize = New-Object System.Drawing.Size(460, 462)
+    $dlg.ClientSize = New-Object System.Drawing.Size(500, 470)
     $dlg.StartPosition = 'CenterParent'
     $dlg.FormBorderStyle = 'FixedDialog'
     $dlg.MaximizeBox = $false; $dlg.MinimizeBox = $false
     $dlg.Font = New-Object System.Drawing.Font('Microsoft YaHei UI', 9)
+    $dlg.BackColor = [System.Drawing.Color]::FromArgb(245, 246, 249)
 
     $hint = New-Object System.Windows.Forms.Label
     $hint.Text = '仅显示当前有可见窗口的程序；勾选后写入筛选列表。'
-    $hint.SetBounds(14, 10, 430, 20)
+    $hint.SetBounds(14, 10, 470, 20)
     $dlg.Controls.Add($hint)
 
-    $clb = New-Object System.Windows.Forms.CheckedListBox
-    $clb.SetBounds(14, 36, 432, 362)
-    $clb.CheckOnClick = $true
-    $clb.HorizontalScrollbar = $true
-    $clb.IntegralHeight = $false
+    $il = New-Object System.Windows.Forms.ImageList
+    $il.ImageSize = New-Object System.Drawing.Size(16, 16)
+    $il.ColorDepth = 'Depth32Bit'
+
+    $lv = New-Object System.Windows.Forms.ListView
+    $lv.SetBounds(14, 36, 472, 366)
+    $lv.View = 'Details'
+    $lv.CheckBoxes = $true
+    $lv.FullRowSelect = $true
+    $lv.MultiSelect = $false
+    $lv.HeaderStyle = 'Nonclickable'
+    $lv.SmallImageList = $il
+    $lv.BackColor = [System.Drawing.Color]::White
+    [void]$lv.Columns.Add('程序（勾选 = 加入筛选列表）', 440)
+    $dlg.Controls.Add($lv)
+
     foreach ($a in $apps) {
+        $imgIdx = -1
+        $bmp = Get-AppIcon $a.Hwnd $a.Name
+        if ($bmp) { $il.Images.Add($bmp); $imgIdx = $il.Images.Count - 1 }
         $label = if ($a.Title) { "$($a.Name)   —   $($a.Title)" } else { $a.Name }
-        $idx = $clb.Items.Add($label)
+        $item = New-Object System.Windows.Forms.ListViewItem($label, $imgIdx)
+        $item.Checked = ($cur -contains $a.Name)
+        [void]$lv.Items.Add($item)
         $names.Add($a.Name)
-        if ($cur -contains $a.Name) { $clb.SetItemChecked($idx, $true) }
     }
     foreach ($n in $cur) {
         if (-not ($names -contains $n)) {
-            $idx = $clb.Items.Add("$n   —   (未运行)")
+            $item = New-Object System.Windows.Forms.ListViewItem("$n   —   (未运行)", -1)
+            $item.Checked = $true
+            [void]$lv.Items.Add($item)
             $names.Add($n)
-            $clb.SetItemChecked($idx, $true)
         }
     }
-    $dlg.Controls.Add($clb)
 
     $ok = New-Object System.Windows.Forms.Button
-    $ok.Text = '确定'; $ok.SetBounds(280, 410, 80, 30); $ok.DialogResult = 'OK'
+    $ok.Text = '确定'; $ok.SetBounds(320, 412, 80, 30); $ok.DialogResult = 'OK'
+    Set-BtnStyle $ok -Primary
     $cancel = New-Object System.Windows.Forms.Button
-    $cancel.Text = '取消'; $cancel.SetBounds(366, 410, 80, 30); $cancel.DialogResult = 'Cancel'
+    $cancel.Text = '取消'; $cancel.SetBounds(406, 412, 80, 30); $cancel.DialogResult = 'Cancel'
+    Set-BtnStyle $cancel
     $dlg.Controls.Add($ok); $dlg.Controls.Add($cancel)
     $dlg.AcceptButton = $ok; $dlg.CancelButton = $cancel
 
     if ($dlg.ShowDialog($form) -eq 'OK') {
         $sel = New-Object System.Collections.Generic.List[string]
-        for ($i = 0; $i -lt $clb.Items.Count; $i++) { if ($clb.GetItemChecked($i)) { $sel.Add($names[$i]) } }
+        for ($i = 0; $i -lt $lv.Items.Count; $i++) { if ($lv.Items[$i].Checked) { $sel.Add($names[$i]) } }
         $txtFilterList.Text = ($sel -join ', ')
         if ($sel.Count -gt 0 -and $cbFilterMode.SelectedIndex -eq 0) { $cbFilterMode.SelectedIndex = 1 }
         Log-Line ("程序列表已更新: " + ($sel -join ', '))
