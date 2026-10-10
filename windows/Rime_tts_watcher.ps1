@@ -44,6 +44,12 @@ function Import-Config {
 $null = Import-Config
 $script:CfgStamp = if (Test-Path -LiteralPath $ConfigFile) { (Get-Item -LiteralPath $ConfigFile).LastWriteTimeUtc } else { [DateTime]::MinValue }
 
+# single instance: never run two readers at once
+$script:WtrMutex = New-Object System.Threading.Mutex($false, 'Local\RimeTtsReadback.Watcher')
+$wtrFirst = $false
+try { $wtrFirst = $script:WtrMutex.WaitOne(0) } catch { $wtrFirst = $true }
+if (-not $wtrFirst) { exit 0 }
+
 $OffFile = Join-Path $env:USERPROFILE 'Rime_tts_off'
 $LogFile = Join-Path $env:USERPROFILE 'Rime_tts_watcher.log'
 $RawWav  = Join-Path $env:TEMP 'rime_tts_raw.wav'
