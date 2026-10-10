@@ -4,6 +4,9 @@
 Rime_tts_queue/
 Rime_tts_off
 
+# build output
+dist/
+
 # Windows / editor noise
 Thumbs.db
 desktop.ini
