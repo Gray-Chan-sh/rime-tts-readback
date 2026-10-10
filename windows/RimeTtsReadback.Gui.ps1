@@ -556,9 +556,119 @@ function Run-Action([string]$title, [scriptblock]$body) {
     catch { Log-Line "错误: $($_.Exception.Message)" }
     finally {
         Refresh-View
+        Update-Tray
         $form.Cursor = [System.Windows.Forms.Cursors]::Default
     }
 }
+
+# ---------------------------------------------------------------- tray icon
+$script:ReallyExit   = $false
+$script:TrayState    = ''
+$script:BalloonShown = $false
+
+function New-StateIcon([System.Drawing.Color]$c) {
+    $bmp = New-Object System.Drawing.Bitmap 32, 32
+    $g = [System.Drawing.Graphics]::FromImage($bmp)
+    $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
+    $g.Clear([System.Drawing.Color]::Transparent)
+    $brush = New-Object System.Drawing.SolidBrush $c
+    $g.FillEllipse($brush, 3, 3, 26, 26)
+    $brush.Dispose()
+    $g.Dispose()
+    $ico = [System.Drawing.Icon]::FromHandle($bmp.GetHicon())
+    $bmp.Dispose()
+    return $ico
+}
+$script:IcoOk   = New-StateIcon ([System.Drawing.Color]::FromArgb(40, 160, 70))
+$script:IcoWarn = New-StateIcon ([System.Drawing.Color]::FromArgb(215, 145, 0))
+$script:IcoOff  = New-StateIcon ([System.Drawing.Color]::FromArgb(150, 150, 150))
+
+$notify = New-Object System.Windows.Forms.NotifyIcon
+$notify.Icon = $script:IcoOff
+$notify.Text = 'Rime 回读'
+$notify.Visible = $true
+
+$menu = New-Object System.Windows.Forms.ContextMenuStrip
+$miShow    = $menu.Items.Add('显示窗口')
+$miEnable  = $menu.Items.Add('启用回读')
+$miDisable = $menu.Items.Add('禁用回读')
+[void]$menu.Items.Add('-')
+$miExit    = $menu.Items.Add('退出')
+$notify.ContextMenuStrip = $menu
+
+function Get-TrayState {
+    $st = Get-FeatureState
+    if (-not $st.Installed) { return 'missing' }
+    if ($st.Muted)          { return 'off' }
+    if (-not $st.Watcher -or -not $st.Deployed) { return 'warn' }
+    return 'ok'
+}
+
+function Update-Tray {
+    $s = Get-TrayState
+    if ($s -ne $script:TrayState) {
+        $script:TrayState = $s
+        switch ($s) {
+            'ok'      { $notify.Icon = $script:IcoOk;   $notify.Text = 'Rime 回读：可用' }
+            'warn'    { $notify.Icon = $script:IcoWarn; $notify.Text = 'Rime 回读：未就绪（后台未运行或未部署）' }
+            'off'     { $notify.Icon = $script:IcoOff;  $notify.Text = 'Rime 回读：已禁用' }
+            'missing' { $notify.Icon = $script:IcoOff;  $notify.Text = 'Rime 回读：未安装' }
+        }
+    }
+    if ($form.Visible) { Refresh-View }
+}
+
+function Show-Main {
+    $form.ShowInTaskbar = $true
+    $form.Show()
+    $form.WindowState = [System.Windows.Forms.FormWindowState]::Normal
+    $form.Activate()
+    $form.BringToFront()
+}
+
+function Hide-ToTray {
+    $form.Hide()
+    $form.ShowInTaskbar = $false
+    if (-not $script:BalloonShown) {
+        $script:BalloonShown = $true
+        try {
+            $notify.ShowBalloonTip(1500, 'Rime 回读', '已最小化到通知栏，单击图标可恢复。',
+                                   [System.Windows.Forms.ToolTipIcon]::Info)
+        } catch { }
+    }
+}
+
+$notify.Add_MouseClick({
+    param($sender, $evt)
+    if ($evt.Button -eq [System.Windows.Forms.MouseButtons]::Left) { Show-Main }
+})
+$notify.Add_MouseDoubleClick({ Show-Main })
+$miShow.Add_Click({ Show-Main })
+$miEnable.Add_Click({ Run-Action '启用回读（通知栏）' { Enable-Readback } })
+$miDisable.Add_Click({ Run-Action '禁用回读（通知栏）' { Disable-Readback } })
+$miExit.Add_Click({
+    $script:ReallyExit = $true
+    $timer.Stop()
+    $notify.Visible = $false
+    $notify.Dispose()
+    $form.Close()
+})
+
+$form.Add_Resize({
+    if ($form.WindowState -eq [System.Windows.Forms.FormWindowState]::Minimized) { Hide-ToTray }
+})
+$form.Add_FormClosing({
+    param($sender, $evt)
+    if (-not $script:ReallyExit) {
+        $evt.Cancel = $true
+        Hide-ToTray
+    }
+})
+
+$timer = New-Object System.Windows.Forms.Timer
+$timer.Interval = 2000
+$timer.Add_Tick({ Update-Tray })
+$timer.Start()
 
 # ---------------------------------------------------------------- wiring
 $btnRefresh.Add_Click({ Refresh-View; Log-Line '已刷新检测' })
@@ -603,14 +713,19 @@ $btnTest.Add_Click({
 $form.Add_Shown({
     Load-ConfigIntoUi
     Refresh-View
-    Log-Line 'Rime TTS Readback 控制面板已就绪'
+    Update-Tray
+    Log-Line 'Rime TTS Readback 控制面板已就绪（最小化/关闭窗口会缩到通知栏）'
 })
 
 if ($Smoke) {
     [void]$form.CreateControl()
     Load-ConfigIntoUi
     Refresh-View
-    Write-Output 'smoke ok: form constructed, controls loaded'
+    Update-Tray
+    Write-Output 'smoke ok: form constructed, controls loaded, tray state refreshed'
+    $timer.Stop()
+    $notify.Visible = $false
+    $notify.Dispose()
     $form.Dispose()
     exit 0
 }
