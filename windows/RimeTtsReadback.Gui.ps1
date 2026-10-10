@@ -696,7 +696,7 @@ $btnSave = New-Object System.Windows.Forms.Button
 $btnSave.Text = '保存参数'
 $btnSave.SetBounds(470, 348, 120, 30)
 $gbParams.Controls.Add($btnSave)
-$tip.SetToolTip($btnSave, '把当前参数保存到 %USERPROFILE%\Rime_tts_config.json（下次启动朗读时生效）。')
+$tip.SetToolTip($btnSave, '把当前参数保存到 %USERPROFILE%\Rime_tts_config.json；后台朗读会热加载，约 1 秒内自动生效。')
 $btnApply = New-Object System.Windows.Forms.Button
 $btnApply.Text = '保存并重启朗读'
 $btnApply.SetBounds(600, 348, 140, 30)
@@ -1017,7 +1017,7 @@ function Save-Params([switch]$Restart) {
         if (Start-Watcher) { Log-Line '后台朗读已重启，参数已生效' } else { Log-Line '后台朗读未启动（可能未部署）' }
     }
     $msg = if ($diff.Count -eq 0) { '参数无变化' }
-           else { "已保存 $($diff.Count) 项修改" + $(if ($Restart) { '，朗读已重启' } else { '，重启朗读后生效' }) }
+           else { "已保存 $($diff.Count) 项修改" + $(if ($Restart) { '，朗读已重启' } else { '，已自动生效' }) }
     try { $notify.ShowBalloonTip(2500, 'Rime 回读 · 参数已保存', $msg, [System.Windows.Forms.ToolTipIcon]::Info) } catch { }
     Refresh-View
 }

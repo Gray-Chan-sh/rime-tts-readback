@@ -26,18 +26,23 @@ param(
   [string[]]$AppFilterList = @()
 )
 
-# ---- config file (written by the GUI) ----
+# ---- config file (written by the GUI); hot-reloaded whenever it changes ----
 $ConfigFile = Join-Path $env:USERPROFILE 'Rime_tts_config.json'
-if (Test-Path -LiteralPath $ConfigFile) {
+
+function Import-Config {
+  if (-not (Test-Path -LiteralPath $ConfigFile)) { return $false }
   try {
     $cfg = Get-Content -LiteralPath $ConfigFile -Raw -Encoding UTF8 | ConvertFrom-Json
     foreach ($n in @('Voice','Rate','BreakMs','IdleMs','MaxWaitMs','Threshold','PadMs',
                      'Volume','CharByChar','IncludeAscii','AppFilterMode','AppFilterList')) {
       $v = $cfg.$n
-      if ($null -ne $v) { Set-Variable -Name $n -Value $v }
+      if ($null -ne $v) { Set-Variable -Name $n -Value $v -Scope script }
     }
-  } catch { }
+    return $true
+  } catch { return $false }
 }
+$null = Import-Config
+$script:CfgStamp = if (Test-Path -LiteralPath $ConfigFile) { (Get-Item -LiteralPath $ConfigFile).LastWriteTimeUtc } else { [DateTime]::MinValue }
 
 $OffFile = Join-Path $env:USERPROFILE 'Rime_tts_off'
 $LogFile = Join-Path $env:USERPROFILE 'Rime_tts_watcher.log'
@@ -64,8 +69,11 @@ Add-Type -Namespace RimeTTSCore -Name Win -MemberDefinition @'
 '@ -ErrorAction SilentlyContinue
 
 $synth = New-Object System.Speech.Synthesis.SpeechSynthesizer
-try { $synth.SelectVoice($Voice) } catch { Log "SelectVoice failed: $_" }
-$synth.Rate = $Rate
+function Apply-VoiceRate {
+  try { $synth.SelectVoice($Voice) } catch { Log "SelectVoice failed: $($_.Exception.Message)" }
+  try { $synth.Rate = $Rate } catch { }
+}
+Apply-VoiceRate
 
 function Pending {
   @(Get-ChildItem -LiteralPath $QueueDir -Filter *.txt -File -ErrorAction SilentlyContinue |
@@ -212,8 +220,24 @@ Log "watcher started voice=$Voice rate=$Rate break=${BreakMs}ms charByChar=$Char
 
 $buffer = ''; $since = $null; $lastAdd = $null; $fgProc = ''
 $lastSweep = [DateTime]::UtcNow
+$lastCfgCheck = [DateTime]::UtcNow
 
 while ($true) {
+  # hot-reload the config (the GUI writes it) - takes effect within ~1s, no restart needed
+  if ((([DateTime]::UtcNow) - $lastCfgCheck).TotalSeconds -ge 1) {
+    $lastCfgCheck = [DateTime]::UtcNow
+    if (Test-Path -LiteralPath $ConfigFile) {
+      $stamp = (Get-Item -LiteralPath $ConfigFile).LastWriteTimeUtc
+      if ($stamp -ne $script:CfgStamp) {
+        $script:CfgStamp = $stamp
+        if (Import-Config) {
+          Apply-VoiceRate
+          Log "config reloaded: voice=$Voice rate=$Rate break=${BreakMs}ms charByChar=$CharByChar vol=$Volume idle=${IdleMs}ms appFilter=$AppFilterMode [$($AppFilterList -join ',')]"
+        }
+      }
+    }
+  }
+
   if (Test-Path -LiteralPath $OffFile) {
     Pending | Remove-Item -Force -ErrorAction SilentlyContinue
     $buffer = ''; $since = $null; $lastAdd = $null
