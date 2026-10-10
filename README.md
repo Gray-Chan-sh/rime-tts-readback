@@ -106,6 +106,16 @@ strip the silence, and play it ourselves. Time-to-audio drops from about a secon
 | Auto-start at logon | put a shortcut to `Rime_tts_start.bat` in `shell:startup` |
 | Remove completely | `Rime_tts_stop.bat`, delete `%APPDATA%\Rime\rime.lua`, drop the `lua_processor@tts_reporter` lines, redeploy |
 
+## Uninstall
+
+```
+powershell -ExecutionPolicy Bypass -File uninstall.ps1
+```
+
+Stops the reader, removes the schema patches and `rime.lua`, redeploys Rime, deletes the
+autostart entry and the scripts / icons / config / queue / logs under `%USERPROFILE%`.
+The repository folder is left untouched.
+
 ## Control panel (GUI)
 
 `windows\RimeTtsReadback.bat` opens a WinForms control panel (no extra dependencies) that
@@ -130,6 +140,16 @@ does everything without editing files by hand:
 - **Global hotkey** — `Ctrl+Alt+R` toggles readback on/off system-wide (configurable in the
   panel: `Ctrl`/`Alt`/`Shift`/`Win` + `A-Z`, `0-9`, `F1-F12`, `Space`).
 - **Tooltips** — every label, button and field has a balloon tooltip explaining what it does.
+- **One-click install** — 部署 + 启用 (+ autostart) in one button.
+- **Program filter** — read everywhere (default), or only in listed programs, or everywhere
+  except listed programs. The list can be picked from running processes.
+- **Volume / char-by-char** — per-app volume (does not touch the system volume) and a
+  toggle between character-by-character and whole-phrase reading.
+- **Autostart & watchdog** — optional start-at-logon (tray) and auto-restart of the reader
+  if it stops (rate-limited).
+- **Single instance** — a second launch activates the existing window instead of adding a
+  duplicate tray icon / hotkey.
+- **About / version** — version, install paths and current hotkey.
 
 Headless:
 
@@ -176,14 +196,16 @@ rime-tts-readback/
 │  ├─ tray-ok.ico / tray-warn.ico / tray-off.ico
 ├─ tools/
 │  └─ make-icons.ps1                    # regenerates icons/ (GDI+, multi-size DIB)
-└─ install.ps1
+├─ install.ps1
+└─ uninstall.ps1
 ```
 
 ## Known limitations
 
-- **ASCII / numbers typed in "direct" (ASCII) mode may not be spoken.** Rime does not
-  emit a *commit* event for every pass-through keystroke, so nothing reaches the queue.
-  Chinese candidates that are actually committed work reliably.
+- **Only text that is *committed* through Rime is spoken.** Text typed directly (ASCII
+  pass-through, or apps that bypass the IME) does not emit a commit event, so it never
+  reaches the queue and is not read. This is by design — it is exactly what keeps the
+  candidate window's pre-edit letters silent.
 - Output is character-by-character by design (proof-reading aid), so a long sentence
   takes as long as it takes to say. It cannot be faster than speech.
 - The design deliberately never spawns a process from inside the input method. An early
