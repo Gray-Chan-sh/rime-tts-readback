@@ -1036,4 +1036,5 @@ if ($Smoke) {
     exit 0
 }
 
-[void]$form.ShowDialog()
+# Application.Run (not ShowDialog) so hiding the form to the tray keeps the app alive.
+[System.Windows.Forms.Application]::Run($form)

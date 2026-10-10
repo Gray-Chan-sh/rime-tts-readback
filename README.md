@@ -137,6 +137,8 @@ does everything without editing files by hand:
   available (green = available, orange = not ready, grey = disabled / not installed).
   Minimizing or closing the window hides it to the tray; click the icon to restore,
   right-click for 显示窗口 / 启用 / 禁用 / 退出.
+  (On Windows 11 a new tray icon may start in the hidden-icons overflow — pin it via
+  设置 → 个性化 → 任务栏 → 其他系统托盘图标.)
 - **Global hotkey** — `Ctrl+Alt+R` toggles readback on/off system-wide (configurable in the
   panel: `Ctrl`/`Alt`/`Shift`/`Win` + `A-Z`, `0-9`, `F1-F12`, `Space`).
 - **Tooltips** — every label, button and field has a balloon tooltip explaining what it does.
