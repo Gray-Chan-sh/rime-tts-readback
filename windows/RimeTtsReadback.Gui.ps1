@@ -14,12 +14,14 @@ param(
     [switch]$Check,
     [switch]$Smoke,
     [switch]$Tray,
-    [switch]$HotkeyDialog
+    [switch]$HotkeyDialog,
+    [switch]$AboutDialog
 )
 
 $ErrorActionPreference = 'Stop'
 
 $script:AppVersion = '1.0.0'
+$script:RepoUrl    = 'https://github.com/Gray-Chan-sh/rime-tts-readback'
 
 # ---------------------------------------------------------------- paths / state
 $script:RepoRoot = Split-Path -Parent $PSScriptRoot
@@ -436,7 +438,7 @@ namespace RimeHK {
 }
 
 # single instance: the first instance owns the mutex; a later launch informs and exits.
-if (-not ($Check -or $Smoke -or $HotkeyDialog)) {
+if (-not ($Check -or $Smoke -or $HotkeyDialog -or $AboutDialog)) {
     $script:Mutex = New-Object System.Threading.Mutex($false, 'Local\RimeTtsReadback.Gui')
     $first = $false
     try { $first = $script:Mutex.WaitOne(0) } catch { $first = $true }
@@ -1236,6 +1238,85 @@ function Show-HotKeyDialog([string]$current) {
     return $null
 }
 
+function Show-AboutDialog {
+    $ri = Get-RimeInstall
+    $dlg = New-Object System.Windows.Forms.Form
+    $dlg.Text = '关于 Rime TTS Readback'
+    $dlg.ClientSize = New-Object System.Drawing.Size(460, 306)
+    $dlg.StartPosition = 'CenterParent'
+    $dlg.FormBorderStyle = 'FixedDialog'
+    $dlg.MaximizeBox = $false; $dlg.MinimizeBox = $false
+    $dlg.Font = New-Object System.Drawing.Font('Microsoft YaHei UI', 9)
+    $dlg.BackColor = [System.Drawing.Color]::FromArgb(245, 246, 249)
+
+    $t = New-Object System.Windows.Forms.Label
+    $t.Text = 'Rime TTS Readback'
+    $t.Font = New-Object System.Drawing.Font('Microsoft YaHei UI', 13, [System.Drawing.FontStyle]::Bold)
+    $t.SetBounds(16, 12, 300, 26)
+    $dlg.Controls.Add($t)
+
+    $v = New-Object System.Windows.Forms.Label
+    $v.Text = "版本 v$script:AppVersion"
+    $v.ForeColor = [System.Drawing.Color]::FromArgb(110, 116, 124)
+    $v.SetBounds(18, 38, 300, 20)
+    $dlg.Controls.Add($v)
+
+    $riLine = if ($ri) { "$($ri.Dir) (v$($ri.Version))" } else { '未检测到' }
+    $hkLine = if ($chkHot.Checked) { $txtHot.Text } else { '(未启用)' }
+    $asLine = if (Get-Autostart) { '是' } else { '否' }
+    $info = New-Object System.Windows.Forms.Label
+    $infoLines = @(
+        "Rime 安装: $riLine",
+        "用户目录: $script:RimeUserDir",
+        "脚本目录: $PSScriptRoot",
+        "配置文件: $script:ConfigFile",
+        "全局快捷键: $hkLine",
+        "开机自启: $asLine"
+    )
+    $info.Text = ($infoLines -join [Environment]::NewLine)
+    $info.SetBounds(18, 66, 424, 132)
+    $info.UseCompatibleTextRendering = $true   # keep the newlines (GDI would collapse them)
+    $dlg.Controls.Add($info)
+
+    $lblRepo = New-Object System.Windows.Forms.Label
+    $lblRepo.Text = '仓库:'
+    $lblRepo.SetBounds(18, 206, 44, 20)
+    $dlg.Controls.Add($lblRepo)
+
+    $link = New-Object System.Windows.Forms.LinkLabel
+    $link.Text = $script:RepoUrl
+    $link.SetBounds(62, 206, 384, 20)
+    $link.LinkColor = [System.Drawing.Color]::FromArgb(46, 120, 190)
+    $link.Add_LinkClicked({ try { Start-Process $script:RepoUrl } catch { } })
+    $dlg.Controls.Add($link)
+    $tip.SetToolTip($link, '点击用默认浏览器打开仓库；也可点"复制链接"。')
+
+    $btnCopy = New-Object System.Windows.Forms.Button
+    $btnCopy.Text = '复制链接'
+    $btnCopy.SetBounds(236, 246, 96, 30)
+    Set-BtnStyle $btnCopy
+    $btnCopy.Add_Click({
+        try {
+            [System.Windows.Forms.Clipboard]::SetText($script:RepoUrl)
+            $lblRepo.Text = '仓库:(已复制)'
+        } catch { }
+    })
+    $dlg.Controls.Add($btnCopy)
+    $tip.SetToolTip($btnCopy, '把仓库地址复制到剪贴板。')
+
+    $btnOk = New-Object System.Windows.Forms.Button
+    $btnOk.Text = '确定'
+    $btnOk.SetBounds(344, 246, 96, 30)
+    Set-BtnStyle $btnOk -Primary
+    $btnOk.DialogResult = 'OK'
+    $dlg.Controls.Add($btnOk)
+    $dlg.AcceptButton = $btnOk
+    $dlg.CancelButton = $btnOk
+
+    [void]$dlg.ShowDialog($form)
+    $dlg.Dispose()
+}
+
 function Toggle-Readback {
     $st = Get-FeatureState
     if ($st.Muted) {
@@ -1343,20 +1424,7 @@ $btnToggle.Add_Click({
     else           { Run-Action '禁用回读' { Disable-Readback } }
 })
 
-$btnAbout.Add_Click({
-    $ri = Get-RimeInstall
-    $msg = @(
-        "Rime TTS Readback  v$script:AppVersion",
-        "",
-        "Rime 安装: " + $(if ($ri) { "$($ri.Dir) (v$($ri.Version))" } else { '未检测到' }),
-        "用户目录: $script:RimeUserDir",
-        "脚本目录: $PSScriptRoot",
-        "配置文件: $script:ConfigFile",
-        "全局快捷键: " + $(if ($chkHot.Checked) { $txtHot.Text } else { '(未启用)' }),
-        "开机自启: " + $(if (Get-Autostart) { '是' } else { '否' })
-    ) -join [Environment]::NewLine
-    [System.Windows.Forms.MessageBox]::Show($msg, '关于', 'OK', 'Information') | Out-Null
-})
+$btnAbout.Add_Click({ try { Show-AboutDialog } catch { Log-Line "关于窗口失败: $($_.Exception.Message)" } })
 
 $btnSave.Add_Click({
     try { Save-Params } catch { Log-Line "保存失败: $($_.Exception.Message)" }
@@ -1506,6 +1574,11 @@ if ($Smoke) {
 
 if ($HotkeyDialog) {
     Write-Output ('captured=' + (Show-HotKeyDialog 'Ctrl+Alt+R'))
+    exit 0
+}
+if ($AboutDialog) {
+    Load-ConfigIntoUi
+    Show-AboutDialog
     exit 0
 }
 
