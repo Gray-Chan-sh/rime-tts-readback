@@ -124,6 +124,30 @@ function Get-Voices {
     } catch { return @() }
 }
 
+# only processes that own a visible, titled top-level window (what the user can actually see)
+function Get-VisibleApps {
+    $rows = @()
+    try { $rows = [RimeHK.WinEnum]::Visible() } catch { return @() }
+    $noise = @('TextInputHost', 'SystemSettings', 'ApplicationFrameHost', 'ShellExperienceHost',
+               'StartMenuExperienceHost', 'SearchHost', 'LockApp',
+               'WindowsInternal.ComposableShell.Experiences.TextInput.InputApp')
+    $map = @{}
+    foreach ($r in $rows) {
+        $parts = $r -split "`t", 2
+        if ($parts.Count -lt 2) { continue }
+        $procId = 0
+        [void][int]::TryParse($parts[0], [ref]$procId)
+        if ($procId -le 0) { continue }
+        $pname = (Get-Process -Id $procId -ErrorAction SilentlyContinue).ProcessName
+        if (-not $pname) { continue }
+        if ($noise -contains $pname) { continue }
+        if (-not $map.ContainsKey($pname)) { $map[$pname] = $parts[1] }
+    }
+    return @($map.GetEnumerator() | Sort-Object Name | ForEach-Object {
+        [PSCustomObject]@{ Name = $_.Key; Title = $_.Value }
+    })
+}
+
 function Invoke-Redeploy {
     $ri = Get-RimeInstall
     if (-not $ri) { return '未检测到 Rime，无法部署' }
@@ -347,6 +371,31 @@ namespace RimeHK {
         }
         public void Dispose() { if (this.Handle != IntPtr.Zero) this.DestroyHandle(); }
     }
+
+    public static class WinEnum {
+        [DllImport("user32.dll")] private static extern bool EnumWindows(EnumProc cb, IntPtr l);
+        [DllImport("user32.dll")] private static extern bool IsWindowVisible(IntPtr h);
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetWindowText(IntPtr h, System.Text.StringBuilder s, int n);
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetWindowTextLength(IntPtr h);
+        [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
+        [DllImport("user32.dll")] private static extern int GetWindowLong(IntPtr h, int idx);
+        private delegate bool EnumProc(IntPtr h, IntPtr l);
+        // returns "pid\twindow title" for every visible, titled, non-tool top-level window
+        public static System.Collections.Generic.List<string> Visible() {
+            var list = new System.Collections.Generic.List<string>();
+            EnumWindows(delegate(IntPtr h, IntPtr l) {
+                if (!IsWindowVisible(h)) return true;
+                if (GetWindowTextLength(h) == 0) return true;
+                if ((GetWindowLong(h, -20) & 0x00000080) != 0) return true;   // WS_EX_TOOLWINDOW
+                uint pid; GetWindowThreadProcessId(h, out pid);
+                var sb = new System.Text.StringBuilder(512);
+                GetWindowText(h, sb, sb.Capacity);
+                list.Add(pid.ToString() + "\t" + sb.ToString());
+                return true;
+            }, IntPtr.Zero);
+            return list;
+        }
+    }
 }
 '@ -ReferencedAssemblies 'System.Windows.Forms'
 }
@@ -364,14 +413,71 @@ if (-not ($Check -or $Smoke)) {
 }
 $script:HkWnd = New-Object RimeHK.HotKeyWindow
 
+# ---------------------------------------------------------------- icons
+function New-StateIcon([System.Drawing.Color]$c) {
+    $bmp = New-Object System.Drawing.Bitmap 32, 32
+    $g = [System.Drawing.Graphics]::FromImage($bmp)
+    $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
+    $g.Clear([System.Drawing.Color]::Transparent)
+    $brush = New-Object System.Drawing.SolidBrush $c
+    $g.FillEllipse($brush, 3, 3, 26, 26)
+    $brush.Dispose(); $g.Dispose()
+    $ico = [System.Drawing.Icon]::FromHandle($bmp.GetHicon())
+    $bmp.Dispose()
+    return $ico
+}
+function Resolve-IconPath([string]$name) {
+    foreach ($base in @((Join-Path $PSScriptRoot 'icons'),
+                        (Join-Path $script:UserHome 'icons'),
+                        (Join-Path $script:RepoRoot 'icons'))) {
+        $p = Join-Path $base $name
+        if (Test-Path -LiteralPath $p) { return $p }
+    }
+    return $null
+}
+function Load-IconOrDraw([string]$name, [System.Drawing.Color]$fallback) {
+    $p = Resolve-IconPath $name
+    if ($p) { try { return (New-Object System.Drawing.Icon $p) } catch { } }
+    return (New-StateIcon $fallback)
+}
+$script:IcoApp  = Load-IconOrDraw 'rime-tts-readback.ico' ([System.Drawing.Color]::FromArgb(46, 120, 190))
+$script:IcoOk   = Load-IconOrDraw 'tray-ok.ico'   ([System.Drawing.Color]::FromArgb(46, 160, 67))
+$script:IcoWarn = Load-IconOrDraw 'tray-warn.ico' ([System.Drawing.Color]::FromArgb(224, 150, 0))
+$script:IcoOff  = Load-IconOrDraw 'tray-off.ico'  ([System.Drawing.Color]::FromArgb(150, 150, 150))
+
 # ---------------------------------------------------------------- GUI
 $form = New-Object System.Windows.Forms.Form
 $form.Text = "Rime TTS Readback 控制面板  v$script:AppVersion"
-$form.ClientSize = New-Object System.Drawing.Size(780, 1040)
+$form.ClientSize = New-Object System.Drawing.Size(780, 1108)
 $form.StartPosition = 'CenterScreen'
 $form.Font = New-Object System.Drawing.Font('Microsoft YaHei UI', 9)
 $form.FormBorderStyle = 'FixedSingle'
 $form.MaximizeBox = $false
+$form.BackColor = [System.Drawing.Color]::FromArgb(245, 246, 249)
+
+# ---- header band
+$header = New-Object System.Windows.Forms.Panel
+$header.SetBounds(0, 0, 780, 64)
+$header.BackColor = [System.Drawing.Color]::FromArgb(46, 120, 190)
+$form.Controls.Add($header)
+$picIcon = New-Object System.Windows.Forms.PictureBox
+$picIcon.SetBounds(14, 10, 44, 44)
+$picIcon.SizeMode = 'Zoom'
+try { $picIcon.Image = $script:IcoApp.ToBitmap() } catch { }
+$header.Controls.Add($picIcon)
+$lblHeadTitle = New-Object System.Windows.Forms.Label
+$lblHeadTitle.Text = 'Rime TTS Readback'
+$lblHeadTitle.ForeColor = [System.Drawing.Color]::White
+$lblHeadTitle.Font = New-Object System.Drawing.Font('Microsoft YaHei UI', 13, [System.Drawing.FontStyle]::Bold)
+$lblHeadTitle.BackColor = [System.Drawing.Color]::Transparent
+$lblHeadTitle.SetBounds(68, 9, 420, 26)
+$header.Controls.Add($lblHeadTitle)
+$lblHeadSub = New-Object System.Windows.Forms.Label
+$lblHeadSub.Text = "小狼毫上屏朗读控制面板    v$script:AppVersion"
+$lblHeadSub.ForeColor = [System.Drawing.Color]::FromArgb(214, 232, 248)
+$lblHeadSub.BackColor = [System.Drawing.Color]::Transparent
+$lblHeadSub.SetBounds(70, 36, 420, 20)
+$header.Controls.Add($lblHeadSub)
 
 $tip = New-Object System.Windows.Forms.ToolTip
 $tip.IsBalloon = $true
@@ -385,20 +491,27 @@ $lblFont = New-Object System.Drawing.Font('Microsoft YaHei UI', 9, [System.Drawi
 # ---- status group
 $gbStatus = New-Object System.Windows.Forms.GroupBox
 $gbStatus.Text = '状态'
-$gbStatus.SetBounds(10, 8, 760, 152)
+$gbStatus.SetBounds(10, 76, 760, 152)
+$gbStatus.BackColor = [System.Drawing.Color]::White
 $form.Controls.Add($gbStatus)
 
 function New-Row([string]$caption, [int]$y, [string]$tipText) {
+    $dot = New-Object System.Windows.Forms.Label
+    $dot.Text = '●'
+    $dot.SetBounds(18, $y, 14, 20)
+    $dot.ForeColor = [System.Drawing.Color]::FromArgb(190, 195, 200)
+    $gbStatus.Controls.Add($dot)
     $c = New-Object System.Windows.Forms.Label
     $c.Text = $caption
-    $c.SetBounds(16, $y, 110, 20)
+    $c.SetBounds(36, $y, 100, 20)
     $c.Font = $lblFont
     $gbStatus.Controls.Add($c)
     $v = New-Object System.Windows.Forms.Label
-    $v.SetBounds(132, $y, 610, 20)
+    $v.SetBounds(140, $y, 600, 20)
     $v.AutoEllipsis = $true
     $gbStatus.Controls.Add($v)
-    if ($tipText) { $tip.SetToolTip($c, $tipText); $tip.SetToolTip($v, $tipText) }
+    $v.Tag = $dot
+    if ($tipText) { $tip.SetToolTip($c, $tipText); $tip.SetToolTip($v, $tipText); $tip.SetToolTip($dot, $tipText) }
     return $v
 }
 $lblRime    = New-Row 'Rime 安装:' 24 '检测到的 Rime/小狼毫 安装目录与版本。未找到说明未安装或路径异常。'
@@ -415,29 +528,50 @@ $tip.SetToolTip($btnRefresh, '重新检测：Rime 安装、方案补丁、是否
 # ---- actions group
 $gbOps = New-Object System.Windows.Forms.GroupBox
 $gbOps.Text = '操作'
-$gbOps.SetBounds(10, 166, 760, 74)
+$gbOps.SetBounds(10, 234, 760, 74)
+$gbOps.BackColor = [System.Drawing.Color]::White
 $form.Controls.Add($gbOps)
 
-function New-Btn([string]$text, [int]$x, [int]$w, [string]$tipText) {
+function Set-BtnStyle($b, [switch]$Primary) {
+    $b.FlatStyle = 'Flat'
+    $b.UseVisualStyleBackColor = $false
+    $b.FlatAppearance.BorderSize = 1
+    if ($Primary) {
+        $b.BackColor = [System.Drawing.Color]::FromArgb(46, 120, 190)
+        $b.ForeColor = [System.Drawing.Color]::White
+        $b.FlatAppearance.BorderColor = [System.Drawing.Color]::FromArgb(38, 105, 168)
+        $b.FlatAppearance.MouseOverBackColor = [System.Drawing.Color]::FromArgb(58, 135, 205)
+        $b.FlatAppearance.MouseDownBackColor = [System.Drawing.Color]::FromArgb(34, 96, 152)
+    } else {
+        $b.BackColor = [System.Drawing.Color]::White
+        $b.ForeColor = [System.Drawing.Color]::FromArgb(50, 55, 62)
+        $b.FlatAppearance.BorderColor = [System.Drawing.Color]::FromArgb(202, 208, 216)
+        $b.FlatAppearance.MouseOverBackColor = [System.Drawing.Color]::FromArgb(234, 243, 251)
+        $b.FlatAppearance.MouseDownBackColor = [System.Drawing.Color]::FromArgb(214, 232, 248)
+    }
+}
+function New-Btn([string]$text, [int]$x, [int]$w, [string]$tipText, [switch]$Primary) {
     $b = New-Object System.Windows.Forms.Button
     $b.Text = $text
     $b.SetBounds($x, 24, $w, 32)
+    Set-BtnStyle $b -Primary:$Primary
     $gbOps.Controls.Add($b)
     if ($tipText) { $tip.SetToolTip($b, $tipText) }
     return $b
 }
-$btnInstall  = New-Btn '部署到 Rime'   14 128 '安装 rime.lua 与朗读脚本，给所有已启用方案加上回读补丁，然后重新部署 Rime。'
+$btnInstall  = New-Btn '部署到 Rime'   14 128 '安装 rime.lua 与朗读脚本，给所有已启用方案加上回读补丁，然后重新部署 Rime。' -Primary
 $btnEnable   = New-Btn '启用'          150 84  '取消静音并启动后台朗读（不会重新部署）。'
 $btnDisable  = New-Btn '禁用'          242 84  '静音并停止后台朗读；此后 rime.lua 不再写入队列。'
 $btnRemove   = New-Btn '删除回读功能'  334 128 '从 Rime 移除所有回读补丁与 rime.lua，并重新部署（会先二次确认）。'
 $btnRedeploy = New-Btn '仅重新部署'    470 108 '只调用 Rime 的重新部署，不改动任何配置。'
 $btnAbout    = New-Btn '关于'          586 84  '显示版本、安装位置与快捷键信息。'
-$btnHelp     = New-Btn '一键安装'      678 68  '一键完成：部署到 Rime + 启用 + 按需设置开机自启。'
+$btnHelp     = New-Btn '一键安装'      678 68  '一键完成：部署到 Rime + 启用 + 按需设置开机自启。' -Primary
 
 # ---- parameters group
 $gbParams = New-Object System.Windows.Forms.GroupBox
 $gbParams.Text = '参数'
-$gbParams.SetBounds(10, 246, 760, 388)
+$gbParams.SetBounds(10, 314, 760, 388)
+$gbParams.BackColor = [System.Drawing.Color]::White
 $form.Controls.Add($gbParams)
 
 function New-ParamLabel([string]$t, [int]$x, [int]$y, [int]$w = 132, [string]$tipText) {
@@ -524,7 +658,8 @@ $tip.SetToolTip($btnApply, '保存参数并立即重启后台朗读，让改动�
 # ---- program filter group
 $gbFilter = New-Object System.Windows.Forms.GroupBox
 $gbFilter.Text = '程序筛选（在哪些程序里朗读）'
-$gbFilter.SetBounds(10, 642, 760, 92)
+$gbFilter.SetBounds(10, 710, 760, 92)
+$gbFilter.BackColor = [System.Drawing.Color]::White
 $form.Controls.Add($gbFilter)
 
 $lblFilterMode = New-Object System.Windows.Forms.Label
@@ -567,7 +702,8 @@ $tip.SetToolTip($lblFilterHint, '朗读只监听 Rime 的上屏(commit)事件，
 # ---- hotkey group
 $gbHot = New-Object System.Windows.Forms.GroupBox
 $gbHot.Text = '全局快捷键'
-$gbHot.SetBounds(10, 742, 760, 72)
+$gbHot.SetBounds(10, 810, 760, 72)
+$gbHot.BackColor = [System.Drawing.Color]::White
 $form.Controls.Add($gbHot)
 
 $lblHot = New-Object System.Windows.Forms.Label
@@ -599,7 +735,8 @@ $tip.SetToolTip($lblHotStatus, '显示快捷键的注册结果（成功 / 格式
 # ---- log group
 $gbLog = New-Object System.Windows.Forms.GroupBox
 $gbLog.Text = '日志'
-$gbLog.SetBounds(10, 822, 760, 208)
+$gbLog.SetBounds(10, 890, 760, 208)
+$gbLog.BackColor = [System.Drawing.Color]::White
 $form.Controls.Add($gbLog)
 $tip.SetToolTip($gbLog, '记录每次操作与结果。后台朗读的详细日志在 %USERPROFILE%\Rime_tts_watcher.log（超过 1MB 自动轮转）。')
 $txtLog = New-Object System.Windows.Forms.TextBox
@@ -648,6 +785,11 @@ function Refresh-View {
     } else {
         $lblRun.Text = '未运行'
         $lblRun.ForeColor = [System.Drawing.Color]::FromArgb(120, 120, 120)
+    }
+
+    # mirror each row's colour onto its status dot
+    foreach ($l in @($lblRime, $lblUser, $lblFeature, $lblRun)) {
+        if ($l.Tag) { $l.Tag.ForeColor = $l.ForeColor }
     }
 }
 
@@ -730,37 +872,6 @@ $script:ReallyExit   = $false
 $script:TrayState    = ''
 $script:BalloonShown = $false
 
-function New-StateIcon([System.Drawing.Color]$c) {
-    $bmp = New-Object System.Drawing.Bitmap 32, 32
-    $g = [System.Drawing.Graphics]::FromImage($bmp)
-    $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
-    $g.Clear([System.Drawing.Color]::Transparent)
-    $brush = New-Object System.Drawing.SolidBrush $c
-    $g.FillEllipse($brush, 3, 3, 26, 26)
-    $brush.Dispose(); $g.Dispose()
-    $ico = [System.Drawing.Icon]::FromHandle($bmp.GetHicon())
-    $bmp.Dispose()
-    return $ico
-}
-function Resolve-IconPath([string]$name) {
-    foreach ($base in @((Join-Path $PSScriptRoot 'icons'),
-                        (Join-Path $script:UserHome 'icons'),
-                        (Join-Path $script:RepoRoot 'icons'))) {
-        $p = Join-Path $base $name
-        if (Test-Path -LiteralPath $p) { return $p }
-    }
-    return $null
-}
-function Load-IconOrDraw([string]$name, [System.Drawing.Color]$fallback) {
-    $p = Resolve-IconPath $name
-    if ($p) { try { return (New-Object System.Drawing.Icon $p) } catch { } }
-    return (New-StateIcon $fallback)
-}
-
-$script:IcoApp  = Load-IconOrDraw 'rime-tts-readback.ico' ([System.Drawing.Color]::FromArgb(41, 121, 190))
-$script:IcoOk   = Load-IconOrDraw 'tray-ok.ico'   ([System.Drawing.Color]::FromArgb(46, 160, 67))
-$script:IcoWarn = Load-IconOrDraw 'tray-warn.ico' ([System.Drawing.Color]::FromArgb(224, 150, 0))
-$script:IcoOff  = Load-IconOrDraw 'tray-off.ico'  ([System.Drawing.Color]::FromArgb(150, 150, 150))
 try { $form.Icon = $script:IcoApp } catch { }
 
 $notify = New-Object System.Windows.Forms.NotifyIcon
@@ -900,6 +1011,14 @@ $timer.Interval = 2000
 $timer.Add_Tick({ Update-Tray; Invoke-Watchdog })
 $timer.Start()
 
+# style the remaining buttons
+Set-BtnStyle $btnRefresh
+Set-BtnStyle $btnTest
+Set-BtnStyle $btnSave
+Set-BtnStyle $btnApply -Primary
+Set-BtnStyle $btnHotApply
+Set-BtnStyle $btnPickProc
+
 # ---------------------------------------------------------------- wiring
 $btnRefresh.Add_Click({ Refresh-View; Log-Line '已刷新检测' })
 $btnInstall.Add_Click({ Run-Action '部署到 Rime' { Install-Readback } })
@@ -978,28 +1097,52 @@ $btnTest.Add_Click({
 })
 $btnPickProc.Add_Click({
     $cur = Get-FilterList
+    $apps = @(Get-VisibleApps)
+    $names = New-Object System.Collections.Generic.List[string]
+
     $dlg = New-Object System.Windows.Forms.Form
-    $dlg.Text = '选择程序（勾选后填入列表）'
-    $dlg.ClientSize = New-Object System.Drawing.Size(320, 430)
+    $dlg.Text = '选择程序（只列出有可见窗口的程序）'
+    $dlg.ClientSize = New-Object System.Drawing.Size(460, 462)
     $dlg.StartPosition = 'CenterParent'
     $dlg.FormBorderStyle = 'FixedDialog'
     $dlg.MaximizeBox = $false; $dlg.MinimizeBox = $false
+    $dlg.Font = New-Object System.Drawing.Font('Microsoft YaHei UI', 9)
+
+    $hint = New-Object System.Windows.Forms.Label
+    $hint.Text = '仅显示当前有可见窗口的程序；勾选后写入筛选列表。'
+    $hint.SetBounds(14, 10, 430, 20)
+    $dlg.Controls.Add($hint)
+
     $clb = New-Object System.Windows.Forms.CheckedListBox
-    $clb.SetBounds(12, 12, 296, 360)
+    $clb.SetBounds(14, 36, 432, 362)
     $clb.CheckOnClick = $true
-    foreach ($n in (Get-Process -ErrorAction SilentlyContinue | Select-Object -ExpandProperty ProcessName | Sort-Object -Unique)) {
-        $idx = $clb.Items.Add($n)
-        if ($cur -contains $n) { $clb.SetItemChecked($idx, $true) }
+    $clb.HorizontalScrollbar = $true
+    $clb.IntegralHeight = $false
+    foreach ($a in $apps) {
+        $label = if ($a.Title) { "$($a.Name)   —   $($a.Title)" } else { $a.Name }
+        $idx = $clb.Items.Add($label)
+        $names.Add($a.Name)
+        if ($cur -contains $a.Name) { $clb.SetItemChecked($idx, $true) }
+    }
+    foreach ($n in $cur) {
+        if (-not ($names -contains $n)) {
+            $idx = $clb.Items.Add("$n   —   (未运行)")
+            $names.Add($n)
+            $clb.SetItemChecked($idx, $true)
+        }
     }
     $dlg.Controls.Add($clb)
+
     $ok = New-Object System.Windows.Forms.Button
-    $ok.Text = '确定'; $ok.SetBounds(150, 384, 75, 28); $ok.DialogResult = 'OK'
+    $ok.Text = '确定'; $ok.SetBounds(280, 410, 80, 30); $ok.DialogResult = 'OK'
     $cancel = New-Object System.Windows.Forms.Button
-    $cancel.Text = '取消'; $cancel.SetBounds(233, 384, 75, 28); $cancel.DialogResult = 'Cancel'
+    $cancel.Text = '取消'; $cancel.SetBounds(366, 410, 80, 30); $cancel.DialogResult = 'Cancel'
     $dlg.Controls.Add($ok); $dlg.Controls.Add($cancel)
     $dlg.AcceptButton = $ok; $dlg.CancelButton = $cancel
+
     if ($dlg.ShowDialog($form) -eq 'OK') {
-        $sel = @($clb.CheckedItems)
+        $sel = New-Object System.Collections.Generic.List[string]
+        for ($i = 0; $i -lt $clb.Items.Count; $i++) { if ($clb.GetItemChecked($i)) { $sel.Add($names[$i]) } }
         $txtFilterList.Text = ($sel -join ', ')
         if ($sel.Count -gt 0 -and $cbFilterMode.SelectedIndex -eq 0) { $cbFilterMode.SelectedIndex = 1 }
         Log-Line ("程序列表已更新: " + ($sel -join ', '))
