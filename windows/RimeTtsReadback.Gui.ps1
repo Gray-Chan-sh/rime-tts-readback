@@ -13,7 +13,8 @@
 param(
     [switch]$Check,
     [switch]$Smoke,
-    [switch]$Tray
+    [switch]$Tray,
+    [switch]$HotkeyDialog
 )
 
 $ErrorActionPreference = 'Stop'
@@ -422,12 +423,20 @@ namespace RimeHK {
             return h;
         }
     }
+
+    public static class Keys2 {
+        [DllImport("user32.dll")] private static extern short GetKeyState(int vKey);
+        // true while either Windows key is held
+        public static bool WinDown() {
+            return ((GetKeyState(0x5B) & 0x8000) != 0) || ((GetKeyState(0x5C) & 0x8000) != 0);
+        }
+    }
 }
 '@ -ReferencedAssemblies 'System.Windows.Forms'
 }
 
 # single instance: the first instance owns the mutex; a later launch informs and exits.
-if (-not ($Check -or $Smoke)) {
+if (-not ($Check -or $Smoke -or $HotkeyDialog)) {
     $script:Mutex = New-Object System.Threading.Mutex($false, 'Local\RimeTtsReadback.Gui')
     $first = $false
     try { $first = $script:Mutex.WaitOne(0) } catch { $first = $true }
@@ -751,23 +760,32 @@ $lblHot.SetBounds(16, 28, 92, 20)
 $gbHot.Controls.Add($lblHot)
 $tip.SetToolTip($lblHot, '在任意程序中都有效的组合键，用来一键切换"启用/禁用回读"。支持 Ctrl/Alt/Shift/Win + A–Z、0–9、F1–F12、Space。')
 $txtHot = New-Object System.Windows.Forms.TextBox
-$txtHot.SetBounds(112, 25, 150, 24)
+$txtHot.SetBounds(112, 25, 130, 24)
 $txtHot.Text = 'Ctrl+Alt+R'
+$txtHot.ReadOnly = $true
+$txtHot.BackColor = [System.Drawing.Color]::White
 $gbHot.Controls.Add($txtHot)
-$tip.SetToolTip($txtHot, '填入组合键，例如 Ctrl+Alt+R、Ctrl+Shift+F9、Win+Alt+Z。点"应用"后立即生效。')
+$tip.SetToolTip($txtHot, '当前快捷键（只读）。点右侧"设置…"按键捕获新的组合键。')
+
+$btnHotSet = New-Object System.Windows.Forms.Button
+$btnHotSet.Text = '设置…'
+$btnHotSet.SetBounds(248, 24, 70, 28)
+$gbHot.Controls.Add($btnHotSet)
+$tip.SetToolTip($btnHotSet, '弹出对话框，直接按下组合键即可设置，并实时报告是否被占用。')
+
 $chkHot = New-Object System.Windows.Forms.CheckBox
 $chkHot.Text = '启用全局快捷键'
-$chkHot.SetBounds(276, 27, 130, 22)
+$chkHot.SetBounds(326, 27, 130, 22)
 $chkHot.Checked = $true
 $gbHot.Controls.Add($chkHot)
 $tip.SetToolTip($chkHot, '取消勾选则注销该全局快捷键，不再响应按键。')
 $btnHotApply = New-Object System.Windows.Forms.Button
 $btnHotApply.Text = '应用'
-$btnHotApply.SetBounds(414, 24, 84, 28)
+$btnHotApply.SetBounds(462, 24, 74, 28)
 $gbHot.Controls.Add($btnHotApply)
-$tip.SetToolTip($btnHotApply, '立即注册/更新快捷键，并把设置保存到配置文件。')
+$tip.SetToolTip($btnHotApply, '按当前显示的组合键重新注册，并把设置保存到配置文件。')
 $lblHotStatus = New-Object System.Windows.Forms.Label
-$lblHotStatus.SetBounds(508, 29, 240, 20)
+$lblHotStatus.SetBounds(544, 29, 204, 20)
 $gbHot.Controls.Add($lblHotStatus)
 $tip.SetToolTip($lblHotStatus, '显示快捷键的注册结果（成功 / 格式无效 / 被其他程序占用）。')
 
@@ -1008,6 +1026,119 @@ function Apply-HotKey([string]$spec, [bool]$enabled) {
     if ($script:HkWnd.Register($script:HKId, $r.Mods, $r.Vk)) { return @{ Ok = $true; Msg = "已注册: $spec" } }
     return @{ Ok = $false; Msg = "注册失败（可能被占用）: $spec" }
 }
+function Test-HotKeyFree([string]$spec) {
+    if (-not $spec) { return @{ Ok = $false; Msg = '未设置组合键' } }
+    $r = Convert-HotKey $spec
+    if (-not $r) { return @{ Ok = $false; Msg = "格式无效: $spec" } }
+    $testId = 0xB0FE
+    $ok = $false
+    try { $ok = $script:HkWnd.Register($testId, $r.Mods, $r.Vk) } catch { $ok = $false }
+    if ($ok) {
+        try { $script:HkWnd.Unregister($testId) } catch { }
+        return @{ Ok = $true; Msg = '可用' }
+    }
+    return @{ Ok = $false; Msg = '该组合键已被其他程序占用（或为系统保留）' }
+}
+
+function Show-HotKeyDialog([string]$current) {
+    $dlg = New-Object System.Windows.Forms.Form
+    $dlg.Text = '设置全局快捷键'
+    $dlg.ClientSize = New-Object System.Drawing.Size(420, 232)
+    $dlg.StartPosition = 'CenterParent'
+    $dlg.FormBorderStyle = 'FixedDialog'
+    $dlg.MaximizeBox = $false; $dlg.MinimizeBox = $false
+    $dlg.KeyPreview = $true
+    $dlg.Font = New-Object System.Drawing.Font('Microsoft YaHei UI', 9)
+    $dlg.BackColor = [System.Drawing.Color]::FromArgb(245, 246, 249)
+
+    $hint = New-Object System.Windows.Forms.Label
+    $hint.Text = '直接按下想要的组合键（需含 Ctrl / Alt / Shift / Win 之一）'
+    $hint.SetBounds(16, 12, 390, 20)
+    $dlg.Controls.Add($hint)
+
+    $box = New-Object System.Windows.Forms.Label
+    $box.Text = $(if ($current) { $current } else { '(未设置)' })
+    $box.TextAlign = 'MiddleCenter'
+    $box.SetBounds(16, 40, 388, 58)
+    $box.BorderStyle = 'FixedSingle'
+    $box.BackColor = [System.Drawing.Color]::White
+    $box.Font = New-Object System.Drawing.Font('Consolas', 16, [System.Drawing.FontStyle]::Bold)
+    $dlg.Controls.Add($box)
+
+    $status = New-Object System.Windows.Forms.Label
+    $status.SetBounds(16, 106, 388, 20)
+    $dlg.Controls.Add($status)
+
+    $tip2 = New-Object System.Windows.Forms.Label
+    $tip2.Text = '支持的按键：A–Z、0–9、F1–F12、Space；Esc 取消，Backspace/Delete 清除'
+    $tip2.ForeColor = [System.Drawing.Color]::FromArgb(120, 125, 132)
+    $tip2.SetBounds(16, 128, 388, 20)
+    $dlg.Controls.Add($tip2)
+
+    $ok = New-Object System.Windows.Forms.Button
+    $ok.Text = '确定'; $ok.SetBounds(236, 184, 80, 30); $ok.DialogResult = 'OK'
+    Set-BtnStyle $ok -Primary
+    $cancel = New-Object System.Windows.Forms.Button
+    $cancel.Text = '取消'; $cancel.SetBounds(322, 184, 80, 30); $cancel.DialogResult = 'Cancel'
+    Set-BtnStyle $cancel
+    $dlg.Controls.Add($ok); $dlg.Controls.Add($cancel)
+    $dlg.AcceptButton = $null
+    $dlg.CancelButton = $cancel
+
+    $script:captured = if ($current) { $current } else { '' }
+
+    $dlg.Add_KeyDown({
+        param($sender, $e)
+        $key = $e.KeyCode
+        if ($key -eq [System.Windows.Forms.Keys]::Escape) { $dlg.DialogResult = 'Cancel'; return }
+        if ($key -eq [System.Windows.Forms.Keys]::Back -or $key -eq [System.Windows.Forms.Keys]::Delete) {
+            $script:captured = ''
+            $box.Text = '(未设置)'
+            $status.Text = ''
+            return
+        }
+        if ($key -eq [System.Windows.Forms.Keys]::ControlKey -or $key -eq [System.Windows.Forms.Keys]::ShiftKey -or
+            $key -eq [System.Windows.Forms.Keys]::Menu -or $key -eq [System.Windows.Forms.Keys]::LWin -or
+            $key -eq [System.Windows.Forms.Keys]::RWin) { return }
+
+        $parts = @()
+        if ($e.Control) { $parts += 'Ctrl' }
+        if ($e.Alt) { $parts += 'Alt' }
+        if ($e.Shift) { $parts += 'Shift' }
+        if ([RimeHK.Keys2]::WinDown()) { $parts += 'Win' }
+
+        $k = [string]$key
+        $name = $null
+        if ($k -match '^[A-Z]$') { $name = $k }
+        elseif ($k -match '^D[0-9]$') { $name = $k.Substring(1) }
+        elseif ($k -match '^NumPad[0-9]$') { $name = $k.Substring(6) }
+        elseif ($k -match '^F([1-9]|1[0-2])$') { $name = $k }
+        elseif ($key -eq [System.Windows.Forms.Keys]::Space) { $name = 'Space' }
+
+        if (-not $name) {
+            $status.Text = '不支持的按键：' + $k
+            $status.ForeColor = [System.Drawing.Color]::FromArgb(170, 0, 0)
+            return
+        }
+        if ($parts.Count -eq 0) {
+            $status.Text = '至少要有一个修饰键（Ctrl / Alt / Shift / Win）'
+            $status.ForeColor = [System.Drawing.Color]::FromArgb(170, 0, 0)
+            return
+        }
+        $combo = ($parts -join '+') + '+' + $name
+        $script:captured = $combo
+        $box.Text = $combo
+        $chk = Test-HotKeyFree $combo
+        $status.Text = $chk.Msg
+        $status.ForeColor = if ($chk.Ok) { [System.Drawing.Color]::FromArgb(0, 110, 0) } else { [System.Drawing.Color]::FromArgb(170, 0, 0) }
+    })
+
+    $res = $dlg.ShowDialog($form)
+    $dlg.Dispose()
+    if ($res -eq 'OK') { return $script:captured }
+    return $null
+}
+
 function Toggle-Readback {
     $st = Get-FeatureState
     if ($st.Muted) {
@@ -1140,6 +1271,23 @@ $btnHotApply.Add_Click({
         Write-Config (Collect-Config)
     } catch { Log-Line "快捷键设置失败: $($_.Exception.Message)" }
 })
+
+$btnHotSet.Add_Click({
+    try {
+        # release the current hotkey while capturing so it does not fire / so the test is accurate
+        try { $script:HkWnd.Unregister($script:HKId) } catch { }
+        $new = Show-HotKeyDialog $txtHot.Text
+        if ($null -ne $new) {
+            $txtHot.Text = $new
+            if ($new -eq '') { $chkHot.Checked = $false }   # cleared -> no hotkey
+        }
+        $r = Apply-HotKey $txtHot.Text ([bool]$chkHot.Checked)
+        $lblHotStatus.Text = $r.Msg
+        $lblHotStatus.ForeColor = if ($r.Ok) { [System.Drawing.Color]::FromArgb(0, 110, 0) } else { [System.Drawing.Color]::FromArgb(170, 0, 0) }
+        Log-Line "全局快捷键: $($r.Msg)"
+        Write-Config (Collect-Config)
+    } catch { Log-Line "快捷键设置失败: $($_.Exception.Message)" }
+})
 $btnTest.Add_Click({
     try {
         Add-Type -AssemblyName System.Speech
@@ -1249,6 +1397,11 @@ if ($Smoke) {
     $notify.Visible = $false
     $notify.Dispose()
     $form.Dispose()
+    exit 0
+}
+
+if ($HotkeyDialog) {
+    Write-Output ('captured=' + (Show-HotKeyDialog 'Ctrl+Alt+R'))
     exit 0
 }
 
