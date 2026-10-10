@@ -342,6 +342,13 @@ $form.Font = New-Object System.Drawing.Font('Microsoft YaHei UI', 9)
 $form.FormBorderStyle = 'FixedSingle'
 $form.MaximizeBox = $false
 
+$tip = New-Object System.Windows.Forms.ToolTip
+$tip.IsBalloon = $true
+$tip.ShowAlways = $true
+$tip.AutoPopDelay = 30000
+$tip.InitialDelay = 250
+$tip.ReshowDelay = 100
+
 $lblFont = New-Object System.Drawing.Font('Microsoft YaHei UI', 9, [System.Drawing.FontStyle]::Bold)
 
 # ---- status group
@@ -350,7 +357,7 @@ $gbStatus.Text = '状态'
 $gbStatus.SetBounds(10, 8, 760, 152)
 $form.Controls.Add($gbStatus)
 
-function New-Row([string]$caption, [int]$y) {
+function New-Row([string]$caption, [int]$y, [string]$tipText) {
     $c = New-Object System.Windows.Forms.Label
     $c.Text = $caption
     $c.SetBounds(16, $y, 110, 20)
@@ -360,17 +367,19 @@ function New-Row([string]$caption, [int]$y) {
     $v.SetBounds(132, $y, 610, 20)
     $v.AutoEllipsis = $true
     $gbStatus.Controls.Add($v)
+    if ($tipText) { $tip.SetToolTip($c, $tipText); $tip.SetToolTip($v, $tipText) }
     return $v
 }
-$lblRime    = New-Row 'Rime 安装:' 24
-$lblUser    = New-Row '用户目录:' 48
-$lblFeature = New-Row '回读功能:' 72
-$lblRun     = New-Row '后台朗读:' 96
+$lblRime    = New-Row 'Rime 安装:' 24 '检测到的 Rime/小狼毫 安装目录与版本。未找到说明未安装或路径异常。'
+$lblUser    = New-Row '用户目录:' 48 'Rime 用户配置目录（%APPDATA%\Rime）。rime.lua 与各 *.custom.yaml 都在这里。'
+$lblFeature = New-Row '回读功能:' 72 '是否已把 lua_processor@tts_reporter 写入各方案补丁、以及是否已部署。[已禁用/静音] 表示当前不朗读。'
+$lblRun     = New-Row '后台朗读:' 96 '负责实际发声的后台进程。未运行时不会朗读；静音时 rime.lua 也不再写入队列。'
 
 $btnRefresh = New-Object System.Windows.Forms.Button
 $btnRefresh.Text = '刷新检测'
 $btnRefresh.SetBounds(640, 118, 104, 26)
 $gbStatus.Controls.Add($btnRefresh)
+$tip.SetToolTip($btnRefresh, '重新检测：Rime 安装、方案补丁、是否已部署、后台进程与静音状态。')
 
 # ---- actions group
 $gbOps = New-Object System.Windows.Forms.GroupBox
@@ -378,18 +387,19 @@ $gbOps.Text = '操作'
 $gbOps.SetBounds(10, 166, 760, 74)
 $form.Controls.Add($gbOps)
 
-function New-Btn([string]$text, [int]$x, [int]$w) {
+function New-Btn([string]$text, [int]$x, [int]$w, [string]$tipText) {
     $b = New-Object System.Windows.Forms.Button
     $b.Text = $text
     $b.SetBounds($x, 24, $w, 32)
     $gbOps.Controls.Add($b)
+    if ($tipText) { $tip.SetToolTip($b, $tipText) }
     return $b
 }
-$btnInstall  = New-Btn '部署到 Rime'   14 140
-$btnEnable   = New-Btn '启用'          164 96
-$btnDisable  = New-Btn '禁用'          270 96
-$btnRemove   = New-Btn '删除回读功能'  376 140
-$btnRedeploy = New-Btn '仅重新部署'    526 120
+$btnInstall  = New-Btn '部署到 Rime'   14 140 '安装 rime.lua 与朗读脚本，给所有已启用方案加上回读补丁，然后重新部署 Rime。'
+$btnEnable   = New-Btn '启用'          164 96 '取消静音并启动后台朗读（不会重新部署）。'
+$btnDisable  = New-Btn '禁用'          270 96 '静音并停止后台朗读；此后 rime.lua 不再写入队列。'
+$btnRemove   = New-Btn '删除回读功能'  376 140 '从 Rime 移除所有回读补丁与 rime.lua，并重新部署（会先二次确认）。'
+$btnRedeploy = New-Btn '仅重新部署'    526 120 '只调用 Rime 的重新部署，不改动任何配置。'
 
 # ---- parameters group
 $gbParams = New-Object System.Windows.Forms.GroupBox
@@ -397,52 +407,50 @@ $gbParams.Text = '参数'
 $gbParams.SetBounds(10, 246, 760, 320)
 $form.Controls.Add($gbParams)
 
-function New-ParamLabel([string]$t, [int]$x, [int]$y, [int]$w = 132) {
+function New-ParamLabel([string]$t, [int]$x, [int]$y, [int]$w = 132, [string]$tipText) {
     $l = New-Object System.Windows.Forms.Label
     $l.Text = $t
     $l.SetBounds($x, $y, $w, 20)
     $gbParams.Controls.Add($l)
+    if ($tipText) { $tip.SetToolTip($l, $tipText) }
+    return $l
 }
 
 $cbVoice = New-Object System.Windows.Forms.ComboBox
 $cbVoice.DropDownStyle = 'DropDownList'
 $cbVoice.SetBounds(158, 24, 288, 24)
 $gbParams.Controls.Add($cbVoice)
-New-ParamLabel '语音' 16 28
+New-ParamLabel '语音' 16 28 132 '朗读使用的系统语音（SAPI）。中文建议选 Microsoft Huihui。' | Out-Null
 $btnTest = New-Object System.Windows.Forms.Button
 $btnTest.Text = '试听'
 $btnTest.SetBounds(460, 23, 70, 26)
 $gbParams.Controls.Add($btnTest)
+$tip.SetToolTip($btnTest, '用当前选择的语音与语速朗读一句，测试发音。')
 $lblVoiceHint = New-Object System.Windows.Forms.Label
 $lblVoiceHint.Text = '（中文建议选 Huihui）'
 $lblVoiceHint.SetBounds(540, 28, 200, 20)
 $gbParams.Controls.Add($lblVoiceHint)
+$tip.SetToolTip($lblVoiceHint, '中文朗读建议使用 Microsoft Huihui Desktop；点"试听"可先听效果。')
 
-function New-Num([string]$cap, [int]$y, [int]$min, [int]$max, [int]$def) {
-    New-ParamLabel $cap 16 $y
+function New-Num([string]$cap, [int]$y, [int]$min, [int]$max, [int]$def, [string]$tipText) {
+    New-ParamLabel $cap 16 $y 132 $tipText | Out-Null
     $n = New-Object System.Windows.Forms.NumericUpDown
     $n.SetBounds(158, $y - 3, 90, 24)
     $n.Minimum = $min
     $n.Maximum = $max
     $n.Value = $def
     $gbParams.Controls.Add($n)
+    if ($tipText) { $tip.SetToolTip($n, $tipText) }
     return $n
 }
-$numRate     = New-Num '语速 Rate'        62  (-10) 10  0
-$numBreak    = New-Num '字间停顿 BreakMs' 96    0  1000 30
-$numIdle     = New-Num '触发间隔 IdleMs' 130    0  2000 60
-$numMaxWait  = New-Num '最长等待 MaxWait' 164    0  3000 200
-$numThresh   = New-Num '静音阈值'         198    0  3000 180
-$numPad      = New-Num '边距 PadMs'       232    0   300 15
+$numRate     = New-Num '语速 Rate'        62  (-10) 10  0   '语速 -10..10。数值越小，每个字读得越慢、越长、越清晰。'
+$numBreak    = New-Num '字间停顿 BreakMs' 96    0  1000 30  '每个字之间插入的静音毫秒数，用来把字与字分开。'
+$numIdle     = New-Num '触发间隔 IdleMs' 130    0  2000 60  '上屏后等待这么久没有新输入才开读。越小越灵敏，越大越能合并成整句。'
+$numMaxWait  = New-Num '最长等待 MaxWait' 164    0  3000 200 '从上屏到开读最多等这么久（毫秒），超过就立即朗读。'
+$numThresh   = New-Num '静音阈值'         198    0  3000 180 '裁剪首尾静音时的判定阈值（16 位采样）。一般不用改。'
+$numPad      = New-Num '边距 PadMs'       232    0   300 15  '裁剪静音时在首尾保留的边距（毫秒），避免把字头字尾切掉。'
 
-$tip = New-Object System.Windows.Forms.ToolTip
-$tip.SetToolTip($cbVoice,     '朗读使用的系统语音')
-$tip.SetToolTip($numRate,     '语速 -10..10；越小每个字读得越长越清晰')
-$tip.SetToolTip($numBreak,    '每个字之间插入的停顿（毫秒）')
-$tip.SetToolTip($numIdle,     '上屏后等待多久算一段；越小越灵敏')
-$tip.SetToolTip($numMaxWait,  '最长等待（毫秒），超过就立即朗读')
-$tip.SetToolTip($numThresh,   '静音判定阈值（16 位采样），一般不用改')
-$tip.SetToolTip($numPad,      '裁剪静音时保留的边距（毫秒）')
+$tip.SetToolTip($cbVoice,     '朗读使用的系统语音（SAPI）。中文建议选 Microsoft Huihui。')
 
 $chkAscii = New-Object System.Windows.Forms.CheckBox
 $chkAscii.Text = '朗读英文与数字 (IncludeAscii)'
@@ -455,10 +463,12 @@ $btnSave      = New-Object System.Windows.Forms.Button
 $btnSave.Text = '保存参数'
 $btnSave.SetBounds(470, 262, 120, 30)
 $gbParams.Controls.Add($btnSave)
+$tip.SetToolTip($btnSave, '把当前参数保存到 %USERPROFILE%\Rime_tts_config.json（下次启动朗读时生效）。')
 $btnApply     = New-Object System.Windows.Forms.Button
 $btnApply.Text = '保存并重启朗读'
 $btnApply.SetBounds(600, 262, 140, 30)
 $gbParams.Controls.Add($btnApply)
+$tip.SetToolTip($btnApply, '保存参数并立即重启后台朗读，让改动马上生效。')
 
 # ---- global hotkey group
 $gbHot = New-Object System.Windows.Forms.GroupBox
@@ -470,32 +480,38 @@ $lblHot = New-Object System.Windows.Forms.Label
 $lblHot.Text = '切换快捷键:'
 $lblHot.SetBounds(16, 28, 92, 20)
 $gbHot.Controls.Add($lblHot)
+$tip.SetToolTip($lblHot, '在任意程序中都有效的组合键，用来一键切换"启用/禁用回读"。支持 Ctrl/Alt/Shift/Win + A–Z、0–9、F1–F12、Space。')
 
 $txtHot = New-Object System.Windows.Forms.TextBox
 $txtHot.SetBounds(112, 25, 150, 24)
 $txtHot.Text = 'Ctrl+Alt+R'
 $gbHot.Controls.Add($txtHot)
+$tip.SetToolTip($txtHot, '填入组合键，例如 Ctrl+Alt+R、Ctrl+Shift+F9、Win+Alt+Z。点"应用"后立即生效。')
 
 $chkHot = New-Object System.Windows.Forms.CheckBox
 $chkHot.Text = '启用全局快捷键'
 $chkHot.SetBounds(276, 27, 130, 22)
 $chkHot.Checked = $true
 $gbHot.Controls.Add($chkHot)
+$tip.SetToolTip($chkHot, '取消勾选则注销该全局快捷键，不再响应按键。')
 
 $btnHotApply = New-Object System.Windows.Forms.Button
 $btnHotApply.Text = '应用'
 $btnHotApply.SetBounds(414, 24, 84, 28)
 $gbHot.Controls.Add($btnHotApply)
+$tip.SetToolTip($btnHotApply, '立即注册/更新快捷键，并把设置保存到配置文件。')
 
 $lblHotStatus = New-Object System.Windows.Forms.Label
 $lblHotStatus.SetBounds(508, 29, 240, 20)
 $gbHot.Controls.Add($lblHotStatus)
+$tip.SetToolTip($lblHotStatus, '显示快捷键的注册结果（成功 / 格式无效 / 被其他程序占用）。')
 
 # ---- log group
 $gbLog = New-Object System.Windows.Forms.GroupBox
 $gbLog.Text = '日志'
 $gbLog.SetBounds(10, 654, 760, 216)
 $form.Controls.Add($gbLog)
+$tip.SetToolTip($gbLog, '记录每次操作与结果，便于排查问题。后台朗读的详细日志在 %USERPROFILE%\Rime_tts_watcher.log。')
 $txtLog = New-Object System.Windows.Forms.TextBox
 $txtLog.Multiline = $true
 $txtLog.ScrollBars = 'Vertical'
@@ -503,6 +519,7 @@ $txtLog.ReadOnly = $true
 $txtLog.SetBounds(12, 22, 736, 184)
 $txtLog.Font = New-Object System.Drawing.Font('Consolas', 9)
 $gbLog.Controls.Add($txtLog)
+$tip.SetToolTip($txtLog, '操作日志（只读）。')
 
 # ---------------------------------------------------------------- view logic
 function Log-Line([string]$m) {

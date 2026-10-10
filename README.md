@@ -129,6 +129,7 @@ does everything without editing files by hand:
   right-click for 显示窗口 / 启用 / 禁用 / 退出.
 - **Global hotkey** — `Ctrl+Alt+R` toggles readback on/off system-wide (configurable in the
   panel: `Ctrl`/`Alt`/`Shift`/`Win` + `A-Z`, `0-9`, `F1-F12`, `Space`).
+- **Tooltips** — every label, button and field has a balloon tooltip explaining what it does.
 
 Headless:
 
