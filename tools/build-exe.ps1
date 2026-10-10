@@ -93,10 +93,15 @@ static class Program
                 version);
             string stamp = Path.Combine(dir, ".extracted");
 
+            // stamp = version + content hash, so a rebuilt exe re-extracts even at the same version
+            uint h = 2166136261;
+            foreach (byte b in Encoding.UTF8.GetBytes(manifest)) { h ^= b; h *= 16777619; }
+            string stampValue = version + "|" + h.ToString("x8");
+
             bool needExtract = !File.Exists(stamp);
             if (!needExtract)
             {
-                try { needExtract = File.ReadAllText(stamp).Trim() != version; } catch { needExtract = true; }
+                try { needExtract = File.ReadAllText(stamp).Trim() != stampValue; } catch { needExtract = true; }
             }
 
             if (needExtract)
@@ -110,7 +115,7 @@ static class Program
                     using (var fs = File.Create(target))
                         s.CopyTo(fs);
                 }
-                File.WriteAllText(stamp, version);
+                File.WriteAllText(stamp, stampValue);
             }
 
             string gui = Path.Combine(dir, Path.Combine("windows", "RimeTtsReadback.Gui.ps1"));
@@ -118,10 +123,20 @@ static class Program
             sb.Append("-NoProfile -STA -ExecutionPolicy Bypass -File \"").Append(gui).Append('"');
             foreach (var a in args) sb.Append(' ').Append('"').Append(a.Replace("\"", "\\\"")).Append('"');
 
-            var psi = new ProcessStartInfo("powershell.exe", sb.ToString());
+            var psi = new ProcessStartInfo();
+            psi.FileName = "powershell.exe";
+            psi.Arguments = sb.ToString();
             psi.UseShellExecute = false;
-            psi.CreateNoWindow = true;
-            Process.Start(psi);
+            psi.CreateNoWindow = true;            // no console window
+            psi.WorkingDirectory = dir;
+            psi.RedirectStandardOutput = true;    // give the child valid std handles
+            psi.RedirectStandardError = true;
+            psi.RedirectStandardInput = true;
+            var child = Process.Start(psi);
+            child.OutputDataReceived += delegate(object s2, DataReceivedEventArgs e2) { };
+            child.ErrorDataReceived += delegate(object s2, DataReceivedEventArgs e2) { };
+            child.BeginOutputReadLine();
+            child.BeginErrorReadLine();
             return 0;
         }
         catch (Exception ex)
