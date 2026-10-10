@@ -1,12 +1,32 @@
--- 上屏文字写入队列：每个提交写一个文件（先写 .tmp 再改名，避免读到半个文件）。
--- 不起进程、不朗读、不做重活；全程 pcall，失败静默跳过，绝不阻塞输入法。
--- 关闭：删掉本文件，并去掉 schema 补丁里的 lua_processor@tts_reporter 一行。
+-- rime-tts-readback: write committed (on-screen) text to a queue file.
+--
+--   * one small file per commit, written as .tmp then renamed (atomic; the reader
+--     never sees a half-written file)
+--   * if %USERPROFILE%\Rime_tts_off exists (the "muted"/disabled flag), nothing is
+--     written at all
+--   * pure file I/O inside pcall: no process spawn, no blocking, safe for the IME
+--
+-- Remove: delete this file and drop `lua_processor@tts_reporter` from your *.custom.yaml.
 
-local QUEUE_DIR = (os.getenv("USERPROFILE") or ".") .. "\\Rime_tts_queue"
+local HOME      = os.getenv("USERPROFILE") or "."
+local QUEUE_DIR = HOME .. "\\Rime_tts_queue"
+local OFF_FILE  = HOME .. "\\Rime_tts_off"
 local seq = 0
+
+local function muted()
+  local f = io.open(OFF_FILE, "r")
+  if f then
+    f:close()
+    return true
+  end
+  return false
+end
 
 local function on_commit(ctx)
   pcall(function()
+    if muted() then
+      return
+    end
     local text = ctx:get_commit_text()
     if text == nil or text == "" then
       return
@@ -29,7 +49,7 @@ tts_reporter = {
     end)
   end,
   func = function(key, env)
-    return 2 -- kNoop：不拦截任何按键
+    return 2 -- kNoop: never intercept keys
   end,
   fini = function(env)
     pcall(function()

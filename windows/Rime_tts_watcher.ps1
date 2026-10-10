@@ -20,6 +20,19 @@ param(
   [bool]$IncludeAscii = $true  # read ASCII letters and digits too (English/numbers)
 )
 
+# Optional config file written by the GUI: %USERPROFILE%\Rime_tts_config.json
+# Only the keys present in the file are applied.
+$ConfigFile = Join-Path $env:USERPROFILE 'Rime_tts_config.json'
+if (Test-Path -LiteralPath $ConfigFile) {
+  try {
+    $cfg = Get-Content -LiteralPath $ConfigFile -Raw -Encoding UTF8 | ConvertFrom-Json
+    foreach ($n in @('Voice','Rate','BreakMs','IdleMs','MaxWaitMs','Threshold','PadMs','IncludeAscii')) {
+      $v = $cfg.$n
+      if ($null -ne $v) { Set-Variable -Name $n -Value $v }
+    }
+  } catch { }
+}
+
 $OffFile = Join-Path $env:USERPROFILE 'Rime_tts_off'
 $LogFile = Join-Path $env:USERPROFILE 'Rime_tts_watcher.log'
 $RawWav  = Join-Path $env:TEMP 'rime_tts_raw.wav'

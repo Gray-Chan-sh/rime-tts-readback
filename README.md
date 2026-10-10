@@ -106,9 +106,36 @@ strip the silence, and play it ourselves. Time-to-audio drops from about a secon
 | Auto-start at logon | put a shortcut to `Rime_tts_start.bat` in `shell:startup` |
 | Remove completely | `Rime_tts_stop.bat`, delete `%APPDATA%\Rime\rime.lua`, drop the `lua_processor@tts_reporter` lines, redeploy |
 
+## Control panel (GUI)
+
+`windows\RimeTtsReadback.bat` opens a WinForms control panel (no extra dependencies) that
+does everything without editing files by hand:
+
+- **Detect** — finds the Rime/Weasel install and version, the user directory, whether the
+  readback integration is *installed* and *deployed*, whether the background reader is
+  running, and whether it is muted.
+- **部署到 Rime** — installs `rime.lua`, the scripts and the `lua_processor@tts_reporter`
+  patch into every enabled schema, then redeploys Rime.
+- **启用 / 禁用** — mute / unmute. Disabling also stops the reader and makes `rime.lua`
+  stop writing (through the `Rime_tts_off` flag), so nothing accumulates.
+- **删除回读功能** — removes the patches and `rime.lua` from Rime and redeploys.
+- **仅重新部署** — runs a Rime redeploy on its own.
+- **Parameters** — voice (picked from the installed SAPI voices, with a preview button),
+  `Rate`, `BreakMs`, `IdleMs`, `MaxWaitMs`, `Threshold`, `PadMs`, `IncludeAscii`, saved to
+  `%USERPROFILE%\Rime_tts_config.json`, which the reader loads on startup.
+
+Headless:
+
+```
+powershell -STA -File RimeTtsReadback.Gui.ps1 -Check   # print a detection report
+powershell -STA -File RimeTtsReadback.Gui.ps1          # open the window
+```
+
 ## Configuration
 
 Edit the parameters at the top of `windows\Rime_tts_watcher.ps1`, then restart the watcher.
+(With the GUI you just use the Parameters box; it writes `%USERPROFILE%\Rime_tts_config.json`
+and restarts the reader.)
 
 | Parameter | Default | Meaning |
 |---|---|---|
@@ -131,6 +158,8 @@ rime-tts-readback/
 │  ├─ wubi86.custom.yaml.example        # example schema patch
 │  └─ wubi_pinyin.custom.yaml.example
 ├─ windows/
+│  ├─ RimeTtsReadback.Gui.ps1           # WinForms control panel
+│  ├─ RimeTtsReadback.bat               # launcher for the GUI
 │  ├─ Rime_tts_watcher.ps1              # resident low-latency watcher / speaker
 │  ├─ Rime_tts_start.bat / Rime_tts_stop.bat
 │  ├─ Rime_tts_stop.ps1
