@@ -586,8 +586,7 @@ function New-Btn([string]$text, [int]$x, [int]$w, [string]$tipText, [switch]$Pri
     return $b
 }
 $btnInstall  = New-Btn '部署到 Rime'   14 128 '安装 rime.lua 与朗读脚本，给所有已启用方案加上回读补丁，然后重新部署 Rime。' -Primary
-$btnEnable   = New-Btn '启用'          150 84  '取消静音并启动后台朗读（不会重新部署）。'
-$btnDisable  = New-Btn '禁用'          242 84  '静音并停止后台朗读；此后 rime.lua 不再写入队列。'
+$btnToggle   = New-Btn '启用 / 禁用'   150 176 '切换回读开关：已启用时点击=禁用（静音并停止后台）；已禁用时点击=启用（取消静音并启动后台）。'
 $btnRemove   = New-Btn '删除回读功能'  334 128 '从 Rime 移除所有回读补丁与 rime.lua，并重新部署（会先二次确认）。'
 $btnRedeploy = New-Btn '仅重新部署'    470 108 '只调用 Rime 的重新部署，不改动任何配置。'
 $btnAbout    = New-Btn '关于'          586 84  '显示版本、安装位置与快捷键信息。'
@@ -811,6 +810,19 @@ function Refresh-View {
     } else {
         $lblRun.Text = '未运行'
         $lblRun.ForeColor = [System.Drawing.Color]::FromArgb(120, 120, 120)
+    }
+
+    # the enable/disable button reflects the current state (click = the opposite action)
+    if ($btnToggle) {
+        if ($st.Muted) {
+            $btnToggle.Text = '启用'
+            Set-BtnStyle $btnToggle -Primary
+            $tip.SetToolTip($btnToggle, '当前已禁用：点击启用回读（取消静音并启动后台朗读）。')
+        } else {
+            $btnToggle.Text = '禁用'
+            Set-BtnStyle $btnToggle
+            $tip.SetToolTip($btnToggle, '当前已启用：点击禁用回读（静音并停止后台朗读）。')
+        }
     }
 
     # mirror each row's colour onto its status dot
@@ -1066,8 +1078,11 @@ $btnRemove.Add_Click({
     }
 })
 $btnRedeploy.Add_Click({ Run-Action '仅重新部署' { , (Invoke-Redeploy) } })
-$btnEnable.Add_Click({ Run-Action '启用回读' { Enable-Readback } })
-$btnDisable.Add_Click({ Run-Action '禁用回读' { Disable-Readback } })
+$btnToggle.Add_Click({
+    $st = Get-FeatureState
+    if ($st.Muted) { Run-Action '启用回读' { Enable-Readback } }
+    else           { Run-Action '禁用回读' { Disable-Readback } }
+})
 
 $btnAbout.Add_Click({
     $ri = Get-RimeInstall
