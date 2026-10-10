@@ -703,6 +703,14 @@ $btnApply.SetBounds(600, 348, 140, 30)
 $gbParams.Controls.Add($btnApply)
 $tip.SetToolTip($btnApply, '保存参数并立即重启后台朗读，让改动马上生效。')
 
+$lblUnsaved = New-Object System.Windows.Forms.Label
+$lblUnsaved.Text = '● 有未保存的修改'
+$lblUnsaved.ForeColor = [System.Drawing.Color]::FromArgb(200, 120, 0)
+$lblUnsaved.SetBounds(16, 354, 300, 20)
+$lblUnsaved.Visible = $false
+$gbParams.Controls.Add($lblUnsaved)
+$tip.SetToolTip($lblUnsaved, '参数已改动但尚未保存。点"保存参数"或"保存并重启朗读"写入配置文件。')
+
 # ---- program filter group
 $gbFilter = New-Object System.Windows.Forms.GroupBox
 $gbFilter.Text = '程序筛选（在哪些程序里朗读）'
@@ -923,6 +931,95 @@ function Load-ConfigIntoUi {
         $cbVoice.SelectedItem = if ($pref) { $pref } else { $cbVoice.Items[0] }
     }
     $chkAuto.Checked = Get-Autostart
+}
+
+# ---------------------------------------------------------------- change feedback
+$script:LastVals    = @{}
+$script:Unsaved     = $false
+$script:LastBalloon = [DateTime]::MinValue
+$script:SavedConfig = $null
+
+function Set-Unsaved([bool]$on) {
+    $script:Unsaved = $on
+    if ($lblUnsaved) { $lblUnsaved.Visible = $on }
+}
+function Balloon-Change([string]$text) {
+    if ((([DateTime]::UtcNow) - $script:LastBalloon).TotalSeconds -lt 2) { return }
+    $script:LastBalloon = [DateTime]::UtcNow
+    try { $notify.ShowBalloonTip(1500, 'Rime 回读 · 参数已修改', $text, [System.Windows.Forms.ToolTipIcon]::Info) } catch { }
+}
+function Track-Change([string]$key, [string]$disp, $value) {
+    $old = $script:LastVals[$key]
+    $script:LastVals[$key] = $value
+    if ($null -eq $old) { return }
+    $ov = if ($old -is [bool]) { if ($old) { '开' } else { '关' } } else { "$old" }
+    $nv = if ($value -is [bool]) { if ($value) { '开' } else { '关' } } else { "$value" }
+    if ($ov -eq $nv) { return }
+    Log-Line ("修改 $disp : $ov → $nv  (未保存)")
+    Set-Unsaved $true
+    Balloon-Change ("$disp : $ov → $nv（未保存）")
+}
+function Snapshot-Controls {
+    $script:LastVals = @{
+        Voice         = [string]$cbVoice.SelectedItem
+        Rate          = [int]$numRate.Value
+        BreakMs       = [int]$numBreak.Value
+        IdleMs        = [int]$numIdle.Value
+        MaxWaitMs     = [int]$numMaxWait.Value
+        Threshold     = [int]$numThresh.Value
+        PadMs         = [int]$numPad.Value
+        Volume        = [int]$numVolume.Value
+        CharByChar    = [bool]$chkCharByChar.Checked
+        IncludeAscii  = [bool]$chkAscii.Checked
+        AutoStart     = [bool]$chkAuto.Checked
+        Watchdog      = [bool]$chkWatch.Checked
+        HotKeyEnabled = [bool]$chkHot.Checked
+        AppFilterMode = (Get-FilterMode)
+        AppFilterList = (@(Get-FilterList) -join ', ')
+    }
+}
+$script:ParamNames = @{
+    Voice = '语音'; Rate = '语速'; BreakMs = '字间停顿'; IdleMs = '触发间隔'; MaxWaitMs = '最长等待'
+    Threshold = '静音阈值'; PadMs = '边距'; Volume = '音量'; CharByChar = '逐字朗读'; IncludeAscii = '朗读英文数字'
+    AppFilterMode = '筛选模式'; AppFilterList = '筛选列表'; HotKey = '快捷键'; HotKeyEnabled = '启用快捷键'
+    AutoStart = '开机自启'; Watchdog = '看门狗'
+}
+function Get-ConfigDiff($old, $new) {
+    $diffs = New-Object System.Collections.Generic.List[string]
+    if (-not $old) { return $diffs }
+    foreach ($p in $new.PSObject.Properties) {
+        $n = $script:ParamNames[$p.Name]; if (-not $n) { $n = $p.Name }
+        $ov = $old.($p.Name); $nv = $p.Value
+        if ($p.Name -eq 'AppFilterList') {
+            $os = (@($ov) -join ', '); $ns = (@($nv) -join ', ')
+            if ($os -ne $ns) { $diffs.Add("$n : [$os] → [$ns]") }
+        } elseif ($p.Name -in @('CharByChar', 'IncludeAscii', 'AutoStart', 'Watchdog', 'HotKeyEnabled')) {
+            $ob = if ($ov) { '开' } else { '关' }; $nb = if ($nv) { '开' } else { '关' }
+            if ($ob -ne $nb) { $diffs.Add("$n : $ob → $nb") }
+        } else {
+            if ("$ov" -ne "$nv") { $diffs.Add("$n : $ov → $nv") }
+        }
+    }
+    return $diffs
+}
+function Save-Params([switch]$Restart) {
+    $new = Collect-Config
+    $diff = Get-ConfigDiff $script:SavedConfig $new
+    Write-Config $new
+    if (-not (Set-Autostart ([bool]$chkAuto.Checked))) { Log-Line '设置开机自启失败（可能无权限）' }
+    if ($diff.Count -eq 0) { Log-Line '参数无变化' }
+    else { foreach ($d in $diff) { Log-Line ('已保存  ' + $d) } }
+    $script:SavedConfig = $new
+    Snapshot-Controls
+    Set-Unsaved $false
+    if ($Restart) {
+        Stop-Watcher; Start-Sleep -Milliseconds 400
+        if (Start-Watcher) { Log-Line '后台朗读已重启，参数已生效' } else { Log-Line '后台朗读未启动（可能未部署）' }
+    }
+    $msg = if ($diff.Count -eq 0) { '参数无变化' }
+           else { "已保存 $($diff.Count) 项修改" + $(if ($Restart) { '，朗读已重启' } else { '，重启朗读后生效' }) }
+    try { $notify.ShowBalloonTip(2500, 'Rime 回读 · 参数已保存', $msg, [System.Windows.Forms.ToolTipIcon]::Info) } catch { }
+    Refresh-View
 }
 
 function Run-Action([string]$title, [scriptblock]$body) {
@@ -1202,6 +1299,23 @@ Set-BtnStyle $btnApply -Primary
 Set-BtnStyle $btnHotApply
 Set-BtnStyle $btnPickProc
 
+# ---- per-change feedback (log + throttled balloon + unsaved marker)
+$numRate.Add_ValueChanged({ Track-Change 'Rate' '语速' ([int]$numRate.Value) })
+$numBreak.Add_ValueChanged({ Track-Change 'BreakMs' '字间停顿' ([int]$numBreak.Value) })
+$numIdle.Add_ValueChanged({ Track-Change 'IdleMs' '触发间隔' ([int]$numIdle.Value) })
+$numMaxWait.Add_ValueChanged({ Track-Change 'MaxWaitMs' '最长等待' ([int]$numMaxWait.Value) })
+$numThresh.Add_ValueChanged({ Track-Change 'Threshold' '静音阈值' ([int]$numThresh.Value) })
+$numPad.Add_ValueChanged({ Track-Change 'PadMs' '边距' ([int]$numPad.Value) })
+$numVolume.Add_ValueChanged({ Track-Change 'Volume' '音量' ([int]$numVolume.Value) })
+$cbVoice.Add_SelectedIndexChanged({ Track-Change 'Voice' '语音' ([string]$cbVoice.SelectedItem) })
+$chkCharByChar.Add_CheckedChanged({ Track-Change 'CharByChar' '逐字朗读' ([bool]$chkCharByChar.Checked) })
+$chkAscii.Add_CheckedChanged({ Track-Change 'IncludeAscii' '朗读英文数字' ([bool]$chkAscii.Checked) })
+$chkAuto.Add_CheckedChanged({ Track-Change 'AutoStart' '开机自启' ([bool]$chkAuto.Checked) })
+$chkWatch.Add_CheckedChanged({ Track-Change 'Watchdog' '看门狗' ([bool]$chkWatch.Checked) })
+$chkHot.Add_CheckedChanged({ Track-Change 'HotKeyEnabled' '启用快捷键' ([bool]$chkHot.Checked) })
+$cbFilterMode.Add_SelectedIndexChanged({ Track-Change 'AppFilterMode' '筛选模式' (Get-FilterMode) })
+$txtFilterList.Add_Leave({ Track-Change 'AppFilterList' '筛选列表' (@(Get-FilterList) -join ', ') })
+
 # ---------------------------------------------------------------- wiring
 $btnRefresh.Add_Click({ Refresh-View; Log-Line '已刷新检测' })
 $btnInstall.Add_Click({ Run-Action '部署到 Rime' { Install-Readback } })
@@ -1245,22 +1359,10 @@ $btnAbout.Add_Click({
 })
 
 $btnSave.Add_Click({
-    try {
-        Write-Config (Collect-Config)
-        if (Set-Autostart ([bool]$chkAuto.Checked)) { } else { Log-Line '设置开机自启失败（可能无权限）' }
-        Log-Line '参数已保存（下次启动朗读时生效）'
-    } catch { Log-Line "保存失败: $($_.Exception.Message)" }
+    try { Save-Params } catch { Log-Line "保存失败: $($_.Exception.Message)" }
 })
 $btnApply.Add_Click({
-    try {
-        Write-Config (Collect-Config)
-        if (-not (Set-Autostart ([bool]$chkAuto.Checked))) { Log-Line '设置开机自启失败（可能无权限）' }
-        Log-Line '参数已保存'
-        Stop-Watcher; Start-Sleep -Milliseconds 400
-        if (Start-Watcher) { Log-Line '后台朗读已重启，参数已生效' }
-        else { Log-Line '后台朗读未启动（可能未部署或脚本缺失）' }
-        Refresh-View
-    } catch { Log-Line "应用失败: $($_.Exception.Message)" }
+    try { Save-Params -Restart } catch { Log-Line "应用失败: $($_.Exception.Message)" }
 })
 $btnHotApply.Add_Click({
     try {
@@ -1268,7 +1370,7 @@ $btnHotApply.Add_Click({
         $lblHotStatus.Text = $r.Msg
         $lblHotStatus.ForeColor = if ($r.Ok) { [System.Drawing.Color]::FromArgb(0, 110, 0) } else { [System.Drawing.Color]::FromArgb(170, 0, 0) }
         Log-Line "全局快捷键: $($r.Msg)"
-        Write-Config (Collect-Config)
+        Save-Params
     } catch { Log-Line "快捷键设置失败: $($_.Exception.Message)" }
 })
 
@@ -1285,7 +1387,7 @@ $btnHotSet.Add_Click({
         $lblHotStatus.Text = $r.Msg
         $lblHotStatus.ForeColor = if ($r.Ok) { [System.Drawing.Color]::FromArgb(0, 110, 0) } else { [System.Drawing.Color]::FromArgb(170, 0, 0) }
         Log-Line "全局快捷键: $($r.Msg)"
-        Write-Config (Collect-Config)
+        Save-Params
     } catch { Log-Line "快捷键设置失败: $($_.Exception.Message)" }
 })
 $btnTest.Add_Click({
@@ -1373,6 +1475,8 @@ $btnPickProc.Add_Click({
 
 $form.Add_Shown({
     Load-ConfigIntoUi
+    Snapshot-Controls
+    $script:SavedConfig = (Collect-Config)
     Refresh-View
     Update-Tray
     $r = Apply-HotKey $txtHot.Text ([bool]$chkHot.Checked)
