@@ -614,9 +614,27 @@ function New-StateIcon([System.Drawing.Color]$c) {
     $bmp.Dispose()
     return $ico
 }
-$script:IcoOk   = New-StateIcon ([System.Drawing.Color]::FromArgb(40, 160, 70))
-$script:IcoWarn = New-StateIcon ([System.Drawing.Color]::FromArgb(215, 145, 0))
-$script:IcoOff  = New-StateIcon ([System.Drawing.Color]::FromArgb(150, 150, 150))
+function Resolve-IconPath([string]$name) {
+    foreach ($base in @((Join-Path $PSScriptRoot 'icons'),
+                        (Join-Path $script:UserHome 'icons'),
+                        (Join-Path $script:RepoRoot 'icons'))) {
+        $p = Join-Path $base $name
+        if (Test-Path -LiteralPath $p) { return $p }
+    }
+    return $null
+}
+function Load-IconOrDraw([string]$name, [System.Drawing.Color]$fallback) {
+    $p = Resolve-IconPath $name
+    if ($p) { try { return (New-Object System.Drawing.Icon $p) } catch { } }
+    return (New-StateIcon $fallback)
+}
+
+$script:IcoApp  = Load-IconOrDraw 'rime-tts-readback.ico' ([System.Drawing.Color]::FromArgb(41, 121, 190))
+$script:IcoOk   = Load-IconOrDraw 'tray-ok.ico'   ([System.Drawing.Color]::FromArgb(46, 160, 67))
+$script:IcoWarn = Load-IconOrDraw 'tray-warn.ico' ([System.Drawing.Color]::FromArgb(224, 150, 0))
+$script:IcoOff  = Load-IconOrDraw 'tray-off.ico'  ([System.Drawing.Color]::FromArgb(150, 150, 150))
+
+try { $form.Icon = $script:IcoApp } catch { }
 
 $notify = New-Object System.Windows.Forms.NotifyIcon
 $notify.Icon = $script:IcoOff

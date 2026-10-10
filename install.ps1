@@ -36,6 +36,14 @@ Get-ChildItem -LiteralPath (Join-Path $here 'windows') -File | ForEach-Object {
     Write-Host "installed: $BinDir\$($_.Name)"
 }
 
+$iconSrc = Join-Path $here 'icons'
+if (Test-Path -LiteralPath $iconSrc) {
+    $iconDst = Join-Path $BinDir 'icons'
+    New-Item -ItemType Directory -Force -Path $iconDst | Out-Null
+    Copy-Item -Path (Join-Path $iconSrc '*') -Destination $iconDst -Force
+    Write-Host "installed icons: $iconDst"
+}
+
 $queue = Join-Path $env:USERPROFILE 'Rime_tts_queue'
 if (-not (Test-Path -LiteralPath $queue)) { New-Item -ItemType Directory -Force -Path $queue | Out-Null }
 

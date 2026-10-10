@@ -170,6 +170,11 @@ rime-tts-readback/
 │  ├─ Rime_tts_start.bat / Rime_tts_stop.bat
 │  ├─ Rime_tts_stop.ps1
 │  └─ Rime_tts_off.bat / Rime_tts_on.bat
+├─ icons/
+│  ├─ rime-tts-readback.ico             # app icon (sound waves + keyboard)
+│  ├─ tray-ok.ico / tray-warn.ico / tray-off.ico
+├─ tools/
+│  └─ make-icons.ps1                    # regenerates icons/ (GDI+, multi-size DIB)
 └─ install.ps1
 ```
 
