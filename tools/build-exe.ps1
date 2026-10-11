@@ -4,7 +4,7 @@
 
     The exe embeds the whole project as resources. On run it extracts to
         %LOCALAPPDATA%\RimeTtsReadback\<version>\
-    (only when the version changes) and launches the control panel.
+    (only when version/content changes) and launches the control panel.
 
     Uses the C# compiler that ships with Windows (csc.exe) - no downloads needed.
 
@@ -32,23 +32,34 @@ if (-not $OutDir) { $OutDir = Join-Path $root 'dist' }
 
 $exe = Join-Path $OutDir ("RimeTtsReadback-" + $Version + ".exe")
 $stage = Join-Path $env:TEMP ("rttr-exe-" + [Guid]::NewGuid().ToString('N'))
-$pkg = Join-Path $stage 'payload'
-
 New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
-New-Item -ItemType Directory -Force -Path $pkg | Out-Null
+New-Item -ItemType Directory -Force -Path $stage | Out-Null
 
-# ---- payload (same file set as the zip build)
+# ---- collect the payload: relative path (forward slashes) -> real file path
+# Relative paths are built from directory NAMES only (never by slicing FullName),
+# so short/long path forms on CI runners cannot corrupt them.
+$entries = New-Object System.Collections.Generic.List[object]
+function Add-Tree([string]$dirPath, [string]$relPrefix) {
+    foreach ($f in (Get-ChildItem -LiteralPath $dirPath -File | Sort-Object Name)) {
+        $entries.Add([PSCustomObject]@{ Rel = ($relPrefix + $f.Name); Path = $f.FullName })
+    }
+    foreach ($d in (Get-ChildItem -LiteralPath $dirPath -Directory | Sort-Object Name)) {
+        Add-Tree $d.FullName ($relPrefix + $d.Name + '/')
+    }
+}
 $items = @('README.md', 'LICENSE', 'install.ps1', 'uninstall.ps1', 'rime', 'windows', 'icons', 'tools')
 foreach ($i in $items) {
     $src = Join-Path $root $i
-    if (Test-Path -LiteralPath $src) {
-        Copy-Item -LiteralPath $src -Destination $pkg -Recurse -Force
-    } else { Write-Warning "missing: $i" }
+    if (-not (Test-Path -LiteralPath $src)) { Write-Warning "missing: $i"; continue }
+    if ((Get-Item -LiteralPath $src).PSIsContainer) { Add-Tree $src ($i + '/') }
+    else { $entries.Add([PSCustomObject]@{ Rel = $i; Path = (Get-Item -LiteralPath $src).FullName }) }
 }
-Set-Content -LiteralPath (Join-Path $pkg 'VERSION.txt') -Value $Version -Encoding Ascii
+$verFile = Join-Path $stage 'VERSION.txt'
+[System.IO.File]::WriteAllText($verFile, $Version, (New-Object System.Text.ASCIIEncoding))
+$entries.Add([PSCustomObject]@{ Rel = 'VERSION.txt'; Path = $verFile })
 
-$files = @(Get-ChildItem -LiteralPath $pkg -Recurse -File | Sort-Object FullName)
-$rel = @($files | ForEach-Object { $_.FullName.Substring($pkg.Length + 1).Replace('\', '/') })
+$entries = @($entries | Sort-Object Rel)
+$rel = @($entries | ForEach-Object { $_.Rel })
 $manifestPath = Join-Path $stage 'manifest.txt'
 [System.IO.File]::WriteAllText($manifestPath, ($rel -join "`n"), (New-Object System.Text.ASCIIEncoding))
 
@@ -110,7 +121,8 @@ static class Program
                 for (int i = 0; i < paths.Length; i++)
                 {
                     string target = Path.Combine(dir, paths[i].Replace('/', Path.DirectorySeparatorChar));
-                    Directory.CreateDirectory(Path.GetDirectoryName(target));
+                    string parent = Path.GetDirectoryName(target);
+                    if (!string.IsNullOrEmpty(parent)) Directory.CreateDirectory(parent);
                     using (var s = asm.GetManifestResourceStream("f" + i))
                     using (var fs = File.Create(target))
                         s.CopyTo(fs);
@@ -162,8 +174,8 @@ $cscArgs = @('/nologo', '/target:winexe', '/platform:anycpu', '/optimize+', ('/o
              '/reference:System.dll', '/reference:System.Windows.Forms.dll')
 if (Test-Path -LiteralPath $icon) { $cscArgs += ('/win32icon:' + $icon) }
 $cscArgs += ('/resource:' + $manifestPath + ',manifest')
-for ($i = 0; $i -lt $files.Count; $i++) {
-    $cscArgs += ('/resource:' + $files[$i].FullName + ',f' + $i)
+for ($i = 0; $i -lt $entries.Count; $i++) {
+    $cscArgs += ('/resource:' + $entries[$i].Path + ',f' + $i)
 }
 $cscArgs += $csPath
 
@@ -172,4 +184,4 @@ if ($LASTEXITCODE -ne 0) { throw "csc failed with exit code $LASTEXITCODE" }
 
 Remove-Item -LiteralPath $stage -Recurse -Force
 $fi = Get-Item -LiteralPath $exe
-Write-Host ("built: " + $fi.FullName + "  (" + [math]::Round($fi.Length / 1KB, 1) + " KB, " + $files.Count + " embedded files)")
+Write-Host ("built: " + $fi.FullName + "  (" + [math]::Round($fi.Length / 1KB, 1) + " KB, " + $entries.Count + " embedded files)")
