@@ -47,7 +47,7 @@ function Add-Tree([string]$dirPath, [string]$relPrefix) {
         Add-Tree $d.FullName ($relPrefix + $d.Name + '/')
     }
 }
-$items = @('README.md', 'LICENSE', 'install.ps1', 'uninstall.ps1', 'rime', 'windows', 'icons', 'tools')
+$items = @('README.md', 'README.en.md', 'LICENSE', 'install.ps1', 'uninstall.ps1', 'rime', 'windows', 'icons', 'tools')
 foreach ($i in $items) {
     $src = Join-Path $root $i
     if (-not (Test-Path -LiteralPath $src)) { Write-Warning "missing: $i"; continue }
