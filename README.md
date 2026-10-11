@@ -54,11 +54,60 @@ strip the silence, and play it ourselves. Time-to-audio drops from about a secon
 
 ## Requirements
 
-- Windows 10 / 11
-- Weasel (Rime for Windows) **with Lua support** — `lua_processor` / `rime.lua` must work
-- A SAPI voice for the language you type (default target: `Microsoft Huihui Desktop`, zh-CN)
-  - list voices: `Add-Type -AssemblyName System.Speech; (New-Object System.Speech.Synthesis.SpeechSynthesizer).GetInstalledVoices() | % { $_.VoiceInfo.Name }`
-- PowerShell 5.1 (built in)
+### Tested with
+
+| Component | Version |
+|---|---|
+| Windows | Windows 11 Pro, build 26300, x64 |
+| PowerShell | Windows PowerShell 5.1 (Desktop) |
+| .NET Framework | 4.8 |
+| Weasel (小狼毫) | 0.17.4 |
+| librime | 1.13.1 |
+| SAPI voice | `Microsoft Huihui Desktop` (zh-CN) |
+
+### Windows
+
+- **Windows 10 / 11**, x64 recommended. (Windows 8.1 should work — PowerShell 5.1 and
+  .NET Framework 4.x are available — but it is untested.)
+- **Windows PowerShell 5.1** (built into Windows 10/11). The runtime scripts (control panel and
+  reader) are written for, and only tested on, 5.1 — do not run them with PowerShell 7. The
+  build scripts in `tools/` do run under `pwsh` (that is what CI uses).
+- **.NET Framework 4.x** — the GUI uses WinForms and the reader uses `System.Speech` (SAPI)
+  plus `System.Media.SoundPlayer`. This is .NET **Framework**, not .NET Core / .NET 5+.
+
+### Rime
+
+- A Rime front end **with Lua support** (librime-lua): `lua_processor` / `rime.lua` must work.
+  - Verified with **Weasel 0.17.4 / librime 1.13.1**. Older builds were not tested one by one.
+  - Quick check: the install directory's `rime.dll` contains the string `lua_processor`.
+- Other Rime front ends (Squirrel, ibus-rime, fcitx5-rime): `rime/rime.lua` works after a small
+  path tweak (`HOME` + the platform separator), but the reader and the control panel are
+  Windows-only.
+
+### Voice
+
+- Any installed **SAPI voice**. For Chinese the default target is `Microsoft Huihui Desktop`
+  (zh-CN), which ships with Simplified Chinese Windows; pick another one in the panel
+  (试听 / Preview) if needed.
+
+  ```
+  Add-Type -AssemblyName System.Speech
+  (New-Object System.Speech.Synthesis.SpeechSynthesizer).GetInstalledVoices() |
+      % { $_.VoiceInfo.Name }
+  ```
+
+### Self-check
+
+```
+powershell -STA -File RimeTtsReadback.Gui.ps1 -Check
+```
+
+prints the app version, the detected Rime install, the enabled schemas, whether the integration
+is installed/deployed, whether the reader is running, the autostart state and the available
+voices. The panel's **刷新检测 (Refresh)** button reports the same facts.
+
+> There are no `PSVersion` / framework guards in the code — whether it runs depends on the
+> environment.
 
 ---
 
