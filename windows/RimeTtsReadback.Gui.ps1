@@ -665,7 +665,7 @@ $numIdle     = New-Num '触发间隔 IdleMs' 130    0  2000 60  '上屏后等待
 $numMaxWait  = New-Num '最长等待 MaxWait' 164    0  3000 200 '从上屏到开读最多等这么久（毫秒），超过就立即朗读。'
 $numThresh   = New-Num '静音阈值'         198    0  3000 180 '裁剪首尾静音时的判定阈值（16 位采样）。一般不用改。'
 $numPad      = New-Num '边距 PadMs'       232    0   300 15  '裁剪静音时在首尾保留的边距（毫秒），避免把字头字尾切掉。'
-$numVolume   = New-Num '音量 Volume'      266    0   100 100 '朗读音量 0..100（只影响本程序朗读，不动系统音量）。'
+$numVolume   = New-Num '音量 Volume'      266    0   200 100 '朗读音量 0..200（只影响本程序朗读，不动系统音量）。后台会先把语音峰值归一化，所以 100 就已经比原始 SAPI 响很多；超过 100 会削波，谨慎使用。'
 
 $chkCharByChar = New-Object System.Windows.Forms.CheckBox
 $chkCharByChar.Text = '逐字朗读（字间停顿）'

@@ -150,9 +150,11 @@ function Trim-Silence([byte[]]$bytes, [int]$volume) {
   if ($samples -le 0) { return $bytes }
   $shorts = New-Object 'int16[]' $samples
   [System.Buffer]::BlockCopy($bytes, $off, $shorts, 0, $samples * 2)
-  $first = -1; $last = -1
+  $first = -1; $last = -1; $peak = 0
   for ($k = 0; $k -lt $samples; $k++) {
     $v = [int]$shorts[$k]
+    $a = if ($v -lt 0) { -$v } else { $v }
+    if ($a -gt $peak) { $peak = $a }
     if ($v -gt $Threshold -or $v -lt (-$Threshold)) {
       if ($first -lt 0) { $first = $k }
       $last = $k
@@ -180,10 +182,20 @@ function Trim-Silence([byte[]]$bytes, [int]$volume) {
   $bw.Write([int16]16)
   [void]$bw.Write([System.Text.Encoding]::ASCII.GetBytes('data'))
   $bw.Write([int]$dataLen)
-  if ($volume -ge 100) {
+  # loudness: normalise the peak (SAPI's output is quiet - only ~38% of full scale),
+  # then apply the user volume on top. gain is capped so near-silence is not blown up.
+  $gain = 1.0
+  if ($peak -ge 200) {
+    $gain = (0.90 * 32767.0) / $peak
+    if ($gain -gt 4.0) { $gain = 4.0 }
+    if ($gain -lt 1.0) { $gain = 1.0 }
+  }
+  $factor = $gain * ([double]$volume / 100.0)
+  $script:LastGain = $factor
+
+  if ([Math]::Abs($factor - 1.0) -lt 0.001) {
     $bw.Write($bytes, $off + $first * 2, $dataLen)
   } else {
-    $factor = [double]$volume / 100.0
     $out = New-Object 'int16[]' $n
     for ($k = 0; $k -lt $n; $k++) {
       $s = [int]([int]$shorts[$first + $k] * $factor)
@@ -212,8 +224,8 @@ function Speak-Now([string]$readable, [string]$proc) {
   $player = New-Object System.Media.SoundPlayer $OutWav
   try { $player.PlaySync() } catch { Log ("play error: " + $_) }
   $t2 = [DateTime]::UtcNow
-  Log ("read [" + $readable + "] proc=[" + $proc + "] synth=" + [int](($t1-$t0).TotalMilliseconds) +
-       "ms play=" + [int](($t2-$t1).TotalMilliseconds) + "ms")
+  Log ("read [" + $readable + "] proc=[" + $proc + "] gain=" + [math]::Round($script:LastGain, 2) +
+       "x synth=" + [int](($t1-$t0).TotalMilliseconds) + "ms play=" + [int](($t2-$t1).TotalMilliseconds) + "ms")
 }
 
 # clear stale queue (including half-written .tmp files)

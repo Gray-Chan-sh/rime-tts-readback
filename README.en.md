@@ -52,6 +52,10 @@ silence at each end (a one-character WAV is ~0.9 s long). So we synthesize to a 
 strip the silence, and play it ourselves. Time-to-audio drops from about a second to
 ~0.1–0.3 s, and no time is wasted on silence.
 
+SAPI's output is also quiet — its peak is only ~38% of full scale — so the reader
+**normalises the peak to 90%** before playing: about **2.4× louder** than raw SAPI at the
+default volume, with no clipping.
+
 ---
 
 ## Requirements
@@ -226,7 +230,7 @@ and the reader hot-reloads it.)
 | `-IdleMs` | `60` | commits arriving within this window are merged into one utterance |
 | `-MaxWaitMs` | `200` | never wait longer than this before speaking |
 | `-Threshold` / `-PadMs` | `180` / `15` | silence detection threshold and padding |
-| `-Volume` | `100` | 0..100, affects this app only |
+| `-Volume` | `100` | 0..200, affects this app only; the peak is normalised to 90% first (≈2.4× louder than raw SAPI), >100 clips |
 | `-CharByChar` | `true` | per-character reading; `false` = whole phrase |
 | `-IncludeAscii` | `true` | also speak ASCII letters/digits |
 | `-AppFilterMode` / `-AppFilterList` | `all` / empty | program filter: `all` / `only` / `except` |
