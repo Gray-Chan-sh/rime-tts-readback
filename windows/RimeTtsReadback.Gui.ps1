@@ -20,7 +20,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$script:AppVersion = '1.0.2'
+$script:AppVersion = '1.0.3'
 $script:RepoUrl    = 'https://github.com/Gray-Chan-sh/rime-tts-readback'
 
 # ---------------------------------------------------------------- paths / state
