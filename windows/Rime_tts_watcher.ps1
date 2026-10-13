@@ -14,13 +14,12 @@ param(
   [string]$QueueDir   = (Join-Path $env:USERPROFILE 'Rime_tts_queue'),
   [string]$Voice      = 'Microsoft Huihui Desktop',
   [int]$Rate          = 0,      # lower = each character is pronounced longer/clearer
-  [int]$BreakMs       = 30,     # gap between characters (when CharByChar)
   [int]$IdleMs        = 60,     # group commits that arrive this close together
   [int]$MaxWaitMs     = 200,    # ...but never wait longer than this
   [int]$Threshold     = 180,
   [int]$PadMs         = 15,
-  [int]$Volume        = 100,    # 0..100, applied to the rendered samples
-  [bool]$CharByChar   = $true,  # false = read the phrase in one go (no per-char break)
+  [int]$Volume        = 100,    # 0..200, applied to the rendered samples
+  [bool]$CharByChar   = $false, # true = separate the characters with a comma pause (slower)
   [bool]$IncludeAscii = $true,  # read ASCII letters and digits too
   [string]$AppFilterMode = 'all', # 'all' | 'only' | 'except'
   [string[]]$AppFilterList = @()
@@ -33,7 +32,7 @@ function Import-Config {
   if (-not (Test-Path -LiteralPath $ConfigFile)) { return $false }
   try {
     $cfg = Get-Content -LiteralPath $ConfigFile -Raw -Encoding UTF8 | ConvertFrom-Json
-    foreach ($n in @('Voice','Rate','BreakMs','IdleMs','MaxWaitMs','Threshold','PadMs',
+    foreach ($n in @('Voice','Rate','IdleMs','MaxWaitMs','Threshold','PadMs',
                      'Volume','CharByChar','IncludeAscii','AppFilterMode','AppFilterList')) {
       $v = $cfg.$n
       if ($null -ne $v) { Set-Variable -Name $n -Value $v -Scope script }
@@ -99,15 +98,20 @@ function ReadableChars([string]$txt) {
 }
 
 function Build-Ssml([string]$readable) {
-  $effBreak = if ($CharByChar) { $BreakMs } else { 0 }
-  $sb = New-Object System.Text.StringBuilder
-  [void]$sb.Append("<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='zh-CN'>")
-  foreach ($ch in $readable.ToCharArray()) {
-    [void]$sb.Append([System.Security.SecurityElement]::Escape($ch.ToString()))
-    if ($effBreak -gt 0) { [void]$sb.Append("<break time='${effBreak}ms'/>") }
+  # NOTE: never use <break> here. SAPI's Chinese engine repeats the last syllable when a
+  # <break> appears inside Chinese text, whatever the break time. A full-width comma
+  # (U+FF0C) gives a real pause without the repetition.
+  $comma = [char]0xFF0C
+  if ($CharByChar) {
+    $parts = @()
+    foreach ($ch in $readable.ToCharArray()) {
+      $parts += [System.Security.SecurityElement]::Escape($ch.ToString())
+    }
+    $body = $parts -join $comma
+  } else {
+    $body = [System.Security.SecurityElement]::Escape($readable)
   }
-  [void]$sb.Append('</speak>')
-  return $sb.ToString()
+  return "<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='zh-CN'>$body</speak>"
 }
 
 function Get-ForegroundProcessName {
@@ -234,7 +238,7 @@ try {
     Where-Object { $_.Extension -in '.txt', '.tmp' } | Remove-Item -Force -ErrorAction SilentlyContinue
 } catch { }
 
-Log "watcher started voice=$Voice rate=$Rate break=${BreakMs}ms charByChar=$CharByChar vol=$Volume idle=${IdleMs}ms appFilter=$AppFilterMode [$($AppFilterList -join ',')]"
+Log "watcher started voice=$Voice rate=$Rate charByChar=$CharByChar vol=$Volume idle=${IdleMs}ms appFilter=$AppFilterMode [$($AppFilterList -join ',')]"
 
 $buffer = ''; $since = $null; $lastAdd = $null; $fgProc = ''
 $lastSweep = [DateTime]::UtcNow
@@ -250,7 +254,7 @@ while ($true) {
         $script:CfgStamp = $stamp
         if (Import-Config) {
           Apply-VoiceRate
-          Log "config reloaded: voice=$Voice rate=$Rate break=${BreakMs}ms charByChar=$CharByChar vol=$Volume idle=${IdleMs}ms appFilter=$AppFilterMode [$($AppFilterList -join ',')]"
+          Log "config reloaded: voice=$Voice rate=$Rate charByChar=$CharByChar vol=$Volume idle=${IdleMs}ms appFilter=$AppFilterMode [$($AppFilterList -join ',')]"
         }
       }
     }

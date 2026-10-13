@@ -660,19 +660,18 @@ function New-Num([string]$cap, [int]$y, [int]$min, [int]$max, [int]$def, [string
     return $n
 }
 $numRate     = New-Num '语速 Rate'        62  (-10) 10  0   '语速 -10..10。数值越小，每个字读得越慢、越长、越清晰。'
-$numBreak    = New-Num '字间停顿 BreakMs' 96    0  1000 30  '逐字朗读时，每个字之间插入的静音毫秒数。'
-$numIdle     = New-Num '触发间隔 IdleMs' 130    0  2000 60  '上屏后等待这么久没有新输入才开读。越小越灵敏，越大越能合并成整句。'
-$numMaxWait  = New-Num '最长等待 MaxWait' 164    0  3000 200 '从上屏到开读最多等这么久（毫秒），超过就立即朗读。'
-$numThresh   = New-Num '静音阈值'         198    0  3000 180 '裁剪首尾静音时的判定阈值（16 位采样）。一般不用改。'
-$numPad      = New-Num '边距 PadMs'       232    0   300 15  '裁剪静音时在首尾保留的边距（毫秒），避免把字头字尾切掉。'
-$numVolume   = New-Num '音量 Volume'      266    0   200 100 '朗读音量 0..200（只影响本程序朗读，不动系统音量）。后台会先把语音峰值归一化，所以 100 就已经比原始 SAPI 响很多；超过 100 会削波，谨慎使用。'
+$numIdle     = New-Num '触发间隔 IdleMs'  96    0  2000 60  '上屏后等待这么久没有新输入才开读。越小越灵敏，越大越能合并成整句。'
+$numMaxWait  = New-Num '最长等待 MaxWait' 130    0  3000 200 '从上屏到开读最多等这么久（毫秒），超过就立即朗读。'
+$numThresh   = New-Num '静音阈值'         164    0  3000 180 '裁剪首尾静音时的判定阈值（16 位采样）。一般不用改。'
+$numPad      = New-Num '边距 PadMs'       198    0   300 15  '裁剪静音时在首尾保留的边距（毫秒），避免把字头字尾切掉。'
+$numVolume   = New-Num '音量 Volume'      232    0   200 100 '朗读音量 0..200（只影响本程序朗读，不动系统音量）。后台会先把语音峰值归一化，所以 100 就已经比原始 SAPI 响很多；超过 100 会削波，谨慎使用。'
 
 $chkCharByChar = New-Object System.Windows.Forms.CheckBox
-$chkCharByChar.Text = '逐字朗读（字间停顿）'
-$chkCharByChar.SetBounds(16, 300, 220, 22)
-$chkCharByChar.Checked = $true
+$chkCharByChar.Text = '逐字朗读（字间逗号停顿）'
+$chkCharByChar.SetBounds(16, 300, 260, 22)
+$chkCharByChar.Checked = $false
 $gbParams.Controls.Add($chkCharByChar)
-$tip.SetToolTip($chkCharByChar, '勾选=逐字读出（字与字之间加停顿，便于核对）；取消=整句连续朗读。')
+$tip.SetToolTip($chkCharByChar, '勾选=逐字读出（字与字之间用逗号停顿，约 0.4 秒/字，便于核对，但明显更慢）；取消（默认）=整句连续朗读。')
 
 $chkAscii = New-Object System.Windows.Forms.CheckBox
 $chkAscii.Text = '朗读英文与数字 (IncludeAscii)'
@@ -887,7 +886,6 @@ function Collect-Config {
     [PSCustomObject]@{
         Voice         = [string]$cbVoice.SelectedItem
         Rate          = [int]$numRate.Value
-        BreakMs       = [int]$numBreak.Value
         IdleMs        = [int]$numIdle.Value
         MaxWaitMs     = [int]$numMaxWait.Value
         Threshold     = [int]$numThresh.Value
@@ -913,7 +911,6 @@ function Load-ConfigIntoUi {
     if ($cfg) {
         if ($cfg.Voice -and $cbVoice.Items.Contains($cfg.Voice)) { $cbVoice.SelectedItem = $cfg.Voice }
         if ($null -ne $cfg.Rate)       { $numRate.Value    = [int]$cfg.Rate }
-        if ($null -ne $cfg.BreakMs)    { $numBreak.Value   = [int]$cfg.BreakMs }
         if ($null -ne $cfg.IdleMs)     { $numIdle.Value    = [int]$cfg.IdleMs }
         if ($null -ne $cfg.MaxWaitMs)  { $numMaxWait.Value = [int]$cfg.MaxWaitMs }
         if ($null -ne $cfg.Threshold)  { $numThresh.Value  = [int]$cfg.Threshold }
@@ -965,7 +962,6 @@ function Snapshot-Controls {
     $script:LastVals = @{
         Voice         = [string]$cbVoice.SelectedItem
         Rate          = [int]$numRate.Value
-        BreakMs       = [int]$numBreak.Value
         IdleMs        = [int]$numIdle.Value
         MaxWaitMs     = [int]$numMaxWait.Value
         Threshold     = [int]$numThresh.Value
@@ -981,7 +977,7 @@ function Snapshot-Controls {
     }
 }
 $script:ParamNames = @{
-    Voice = '语音'; Rate = '语速'; BreakMs = '字间停顿'; IdleMs = '触发间隔'; MaxWaitMs = '最长等待'
+    Voice = '语音'; Rate = '语速'; IdleMs = '触发间隔'; MaxWaitMs = '最长等待'
     Threshold = '静音阈值'; PadMs = '边距'; Volume = '音量'; CharByChar = '逐字朗读'; IncludeAscii = '朗读英文数字'
     AppFilterMode = '筛选模式'; AppFilterList = '筛选列表'; HotKey = '快捷键'; HotKeyEnabled = '启用快捷键'
     AutoStart = '开机自启'; Watchdog = '看门狗'
@@ -1382,7 +1378,6 @@ Set-BtnStyle $btnPickProc
 
 # ---- per-change feedback (log + throttled balloon + unsaved marker)
 $numRate.Add_ValueChanged({ Track-Change 'Rate' '语速' ([int]$numRate.Value) })
-$numBreak.Add_ValueChanged({ Track-Change 'BreakMs' '字间停顿' ([int]$numBreak.Value) })
 $numIdle.Add_ValueChanged({ Track-Change 'IdleMs' '触发间隔' ([int]$numIdle.Value) })
 $numMaxWait.Add_ValueChanged({ Track-Change 'MaxWaitMs' '最长等待' ([int]$numMaxWait.Value) })
 $numThresh.Add_ValueChanged({ Track-Change 'Threshold' '静音阈值' ([int]$numThresh.Value) })

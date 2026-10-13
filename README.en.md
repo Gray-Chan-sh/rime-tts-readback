@@ -226,12 +226,11 @@ and the reader hot-reloads it.)
 |---|---|---|
 | `-Voice` | `Microsoft Huihui Desktop` | SAPI voice |
 | `-Rate` | `0` | speech rate, -10..10 (lower = each character longer) |
-| `-BreakMs` | `30` | silence inserted between characters (char-by-char mode) |
 | `-IdleMs` | `60` | commits arriving within this window are merged into one utterance |
 | `-MaxWaitMs` | `200` | never wait longer than this before speaking |
 | `-Threshold` / `-PadMs` | `180` / `15` | silence detection threshold and padding |
 | `-Volume` | `100` | 0..200, affects this app only; the peak is normalised to 90% first (≈2.4× louder than raw SAPI), >100 clips |
-| `-CharByChar` | `true` | per-character reading; `false` = whole phrase |
+| `-CharByChar` | `false` | `true` = per-character (characters separated by a comma pause, ~0.4 s each, slower); `false` = whole phrase |
 | `-IncludeAscii` | `true` | also speak ASCII letters/digits |
 | `-AppFilterMode` / `-AppFilterList` | `all` / empty | program filter: `all` / `only` / `except` |
 
@@ -277,6 +276,9 @@ rime-tts-readback/
   freeze the whole desktop. Do not put anything blocking in the Lua path.
 - The program filter uses the foreground window, so switching apps extremely fast can very
   occasionally misjudge.
+- **Do not use SSML `<break>` with Chinese text.** SAPI's Chinese engine has a bug: a `<break>`
+  inside Chinese text makes it repeat the last syllable ("作为" → "作为为"), regardless of the
+  break time. That is why the per-character mode uses a **comma** for the pause instead.
 
 ## Build & release
 

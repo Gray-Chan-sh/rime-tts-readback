@@ -191,12 +191,11 @@ powershell -STA -File RimeTtsReadback.Gui.ps1          # 打开窗口
 |---|---|---|
 | `-Voice` | `Microsoft Huihui Desktop` | SAPI 语音 |
 | `-Rate` | `0` | 语速 -10..10（越小每个字读得越长越清晰） |
-| `-BreakMs` | `30` | 逐字朗读时字间插入的静音（毫秒） |
 | `-IdleMs` | `60` | 这段时间内到达的上屏会合并成一次朗读 |
 | `-MaxWaitMs` | `200` | 最多等这么久就开读 |
 | `-Threshold` / `-PadMs` | `180` / `15` | 静音判定阈值与保留边距 |
 | `-Volume` | `100` | 音量 0..200（只影响本程序）。后台会先把语音峰值归一化到 90%，所以 100 就比原始 SAPI 响约 2.4 倍；>100 会削波 |
-| `-CharByChar` | `true` | 逐字朗读；`false` 为整句连读 |
+| `-CharByChar` | `false` | `true` = 逐字（字间用逗号停顿，约 0.4 秒/字，更慢但便于核对）；`false` = 整句连读 |
 | `-IncludeAscii` | `true` | 是否也朗读 ASCII 字母/数字 |
 | `-AppFilterMode` / `-AppFilterList` | `all` / 空 | 程序筛选：`all` / `only` / `except` |
 
@@ -236,6 +235,7 @@ rime-tts-readback/
 - 设计上**绝不在输入法内部启动进程**。早期版本在 commit 回调里用 `os.execute()`，会阻塞输入法线程、甚至冻住整个桌面。**不要在 Lua 路径里放任何阻塞操作。**
 - 数字/英文只有在**经输入法上屏**时才会读；直接敲的不会（同上）。
 - 程序筛选依赖"当前前台窗口"，极快切换程序时可能极小概率误判。
+- **不要在中文里用 SSML 的 `<break>`**：SAPI 的中文引擎有 bug——中文文本中插入 `<break>` 会让它把最后一个音节再念一遍（"作为" → "作为为"），且与 break 时长无关。所以"逐字朗读"改用**逗号**来产生停顿。
 
 ## 构建与发布
 
