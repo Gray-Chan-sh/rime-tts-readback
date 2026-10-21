@@ -217,3 +217,11 @@ macOS 直接喂 `AVSpeechUtterance`，不需要。
 - 全局快捷键 `⌃⌥R` 用 Carbon `RegisterEventHotKey` 注册，不需要辅助功能权限；被别的程序占用时，
   面板会提示并自动取消勾选。
 - 菜单栏图标与朗读器都不签名。自己编译自用没问题；要分发给别人则需要签名 + 公证。
+
+---
+
+## 跨平台
+
+`rime/rime.lua`、队列格式和配置键在 Windows / macOS 之间共享；Windows 还有哪些没对齐
+（逐位数字、逐字母英文、分开的开关），以及 Linux 还缺什么，见
+[../DEVELOPING.md](../DEVELOPING.md)。

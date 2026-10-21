@@ -3,8 +3,8 @@
     build-release.ps1 - package rime-tts-readback into a distributable zip.
 
     Produces  dist\rime-tts-readback-<version>.zip  containing the whole project
-    (rime/, windows/, macos/, icons/, tools/, install.ps1, uninstall.ps1, README.md, LICENSE,
-    VERSION.txt) with a top-level folder so it extracts cleanly.
+    (rime/, windows/, macos/, icons/, tools/, install.ps1, uninstall.ps1, README.md,
+    README.en.md, DEVELOPING.md, LICENSE, VERSION.txt) with a top-level folder so it extracts cleanly.
 
     Usage:
         powershell -ExecutionPolicy Bypass -File tools\build-release.ps1
@@ -37,7 +37,7 @@ $pkg = Join-Path $stage $name
 New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
 New-Item -ItemType Directory -Force -Path $pkg | Out-Null
 
-$items = @('README.md', 'README.en.md', 'LICENSE', 'install.ps1', 'uninstall.ps1', 'rime', 'windows', 'macos', 'icons', 'tools')
+$items = @('README.md', 'README.en.md', 'DEVELOPING.md', 'LICENSE', 'install.ps1', 'uninstall.ps1', 'rime', 'windows', 'macos', 'icons', 'tools')
 foreach ($i in $items) {
     $src = Join-Path $root $i
     if (Test-Path -LiteralPath $src) {

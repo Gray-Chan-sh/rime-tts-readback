@@ -13,6 +13,16 @@
 macOS 上用**鼠须管 Squirrel** + 系统语音（`Tingting`），见 [macos/README.md](macos/README.md)。
 两边共用同一个 Lua 上报层，只有「朗读器」按平台各写一份。
 
+## 平台支持
+
+| 平台 | 状态 | 说明 |
+|---|---|---|
+| Windows 10/11（小狼毫 Weasel） | ✅ 已实现并验证 | 本文档 |
+| macOS 13+（鼠须管 Squirrel） | ✅ 已实现并验证 | [macos/README.md](macos/README.md) |
+| Linux（ibus-rime / fcitx5-rime） | 🚧 未实现 | 仅 `rime.lua` 可复用，见 [DEVELOPING.md](DEVELOPING.md) |
+
+跨平台架构、队列协议、配置键和**平台对齐清单**见 [DEVELOPING.md](DEVELOPING.md)。
+
 ---
 
 ## 为什么不用现成的读屏软件？
@@ -84,9 +94,10 @@ Windows SAPI 的"默认音频输出"看起来慢，其实不然：
 - 需要**带 lua 插件（librime-lua）**的 Rime 前端：`lua_processor` / `rime.lua` 必须能用。
   - 已用 **Weasel 0.17.4 / librime 1.13.1** 验证；更早版本未逐个测试。
   - 快速自检：安装目录的 `rime.dll` 里含 `lua_processor` 字样。
-- 其它前端（鼠须管 Squirrel、ibus-rime、fcitx5-rime）：`rime/rime.lua` 已经是跨平台的
-  （自动使用 `HOME` 与正确的路径分隔符），macOS 的朗读器与控制面板见 [macos/README.md](macos/README.md)；
-  Linux 目前只有 Lua 部分可直接用。
+- 其它前端：`rime/rime.lua` 已经是跨平台的（自动使用 `HOME` 与正确的路径分隔符）。
+  - **鼠须管 Squirrel**：朗读器 + 控制面板见 [macos/README.md](macos/README.md)。
+  - **ibus-rime / fcitx5-rime**：目前只有 Lua 层可复用，路径探测和朗读器还没做；
+    见 [DEVELOPING.md](DEVELOPING.md) 的 Linux 清单。
 
 ### 语音
 
@@ -216,7 +227,7 @@ powershell -STA -File RimeTtsReadback.Gui.ps1          # 打开窗口
 macOS 版有一个功能对应的原生面板：`rime-tts panel`，或点菜单栏图标里的「打开控制面板…」。
 
 - 状态检测、一键安装、部署到 Rime、静音、停止/启动后台、删除回读、仅重新部署；
-- 语音（带试听）、语速、音量、合并窗口、最长等待、逐字朗读、英文/数字；
+- 语音（带试听）、语速、音量、合并窗口、最长等待，以及逐字朗读 / 朗读数字 / 朗读英文三个开关；
 - 程序筛选：全部 / 仅这些 / 除这些，可从正在运行的程序里带图标勾选（存 bundle id）；
 - 登录自启、全局快捷键 `⌃⌥R`（Carbon 注册，不需要辅助功能权限）、打开日志/配置、关于；
 - 改参数即写 `config.json`，朗读器约 1 秒内热加载。
@@ -277,6 +288,7 @@ rime-tts-readback/
 │  └─ build-exe.ps1                     # 单文件 exe -> dist/RimeTtsReadback-<v>.exe
 ├─ .github/workflows/build.yml          # CI：构建 Windows zip/exe，并编译检查 macOS 二进制
 ├─ install.ps1 / uninstall.ps1
+├─ DEVELOPING.md                        # 跨平台架构、队列协议、Windows/Linux 待办
 └─ README.md / README.en.md
 ```
 

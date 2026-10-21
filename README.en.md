@@ -15,6 +15,17 @@ On macOS it runs on **Squirrel / 鼠须管** with the system voice (`Tingting`) 
 [macos/README.md](macos/README.md). Both platforms share the same Lua reporter; only the
 reader is written per platform.
 
+## Platforms
+
+| Platform | Status | Notes |
+|---|---|---|
+| Windows 10/11 (Weasel / 小狼毫) | ✅ implemented and tested | this document |
+| macOS 13+ (Squirrel / 鼠须管) | ✅ implemented and tested | [macos/README.md](macos/README.md) |
+| Linux (ibus-rime / fcitx5-rime) | 🚧 not implemented | only `rime.lua` is reusable; see [DEVELOPING.md](DEVELOPING.md) |
+
+Architecture, queue protocol, config keys and the **platform parity checklist**:
+[DEVELOPING.md](DEVELOPING.md).
+
 ---
 
 ## Why not just use a screen reader?
@@ -95,9 +106,12 @@ default volume, with no clipping.
 - A Rime front end **with Lua support** (librime-lua): `lua_processor` / `rime.lua` must work.
   - Verified with **Weasel 0.17.4 / librime 1.13.1**. Older builds were not tested one by one.
   - Quick check: the install directory's `rime.dll` contains the string `lua_processor`.
-- Other Rime front ends (Squirrel, ibus-rime, fcitx5-rime): `rime/rime.lua` is already
-  cross-platform (it uses `HOME` and the right path separator). The macOS reader and menu bar
-  item live in [macos/](macos/README.md); on Linux only the Lua half is usable today.
+- Other Rime front ends: `rime/rime.lua` is already cross-platform (it uses `HOME` and the
+  right path separator).
+  - **Squirrel / 鼠须管**: the reader and control panel live in
+    [macos/](macos/README.md).
+  - **ibus-rime / fcitx5-rime**: only the Lua half is reusable today; path detection and a
+    reader are still missing. See the Linux checklist in [DEVELOPING.md](DEVELOPING.md).
 
 ### Voice
 
@@ -255,7 +269,8 @@ The macOS build has a native panel with the same jobs: `rime-tts panel`, or
 **打开控制面板…** in the menu bar item.
 
 - Detect, one-click install, deploy to Rime, mute, start/stop the reader, remove, redeploy;
-- voice (with preview), rate, volume, grouping window, max wait, char-by-char, ASCII/digits;
+- voice (with preview), rate, volume, grouping window, max wait, plus three toggles:
+  char-by-char, read digits, read English;
 - program filter: all / only these / except these, picked from the running applications
   with icons (stored as bundle ids);
 - launch at login, global hotkey `⌃⌥R` (registered with Carbon, no Accessibility permission
@@ -322,6 +337,7 @@ rime-tts-readback/
 │  └─ build-exe.ps1                     # single-file exe -> dist/RimeTtsReadback-<v>.exe
 ├─ .github/workflows/build.yml          # CI: Windows zip/exe + macOS binary build check
 ├─ install.ps1 / uninstall.ps1
+├─ DEVELOPING.md                        # architecture, queue protocol, Windows/Linux TODO
 └─ README.md / README.en.md
 ```
 
