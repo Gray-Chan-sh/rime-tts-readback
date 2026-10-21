@@ -11,6 +11,10 @@ you commit and `对于` lands in the document, it is spoken one character at a t
 Built and tested on **Weasel / 小狼毫 0.17.4** (librime 1.13.1) with a Chinese SAPI voice
 (`Microsoft Huihui Desktop`).
 
+On macOS it runs on **Squirrel / 鼠须管** with the system voice (`Tingting`) — see
+[macos/README.md](macos/README.md). Both platforms share the same Lua reporter; only the
+reader is written per platform.
+
 ---
 
 ## Why not just use a screen reader?
@@ -36,6 +40,11 @@ so every keystroke of `c f g f` is announced. This project only listens to Rime'
                  ├─ trim SAPI's leading/trailing silence
                  └─ play the trimmed WAV with SoundPlayer  → audio starts immediately
 ```
+
+> The diagram shows the Windows path. The macOS build shares the first half (`rime.lua` →
+> queue file) and replaces the second half with a resident `AVSpeechSynthesizer`: there is no
+> SAPI padding and no `SoundPlayer`, so no WAV rendering, silence trimming or peak
+> normalisation is needed. See [macos/README.md](macos/README.md).
 
 ### The latency trick
 
@@ -86,9 +95,9 @@ default volume, with no clipping.
 - A Rime front end **with Lua support** (librime-lua): `lua_processor` / `rime.lua` must work.
   - Verified with **Weasel 0.17.4 / librime 1.13.1**. Older builds were not tested one by one.
   - Quick check: the install directory's `rime.dll` contains the string `lua_processor`.
-- Other Rime front ends (Squirrel, ibus-rime, fcitx5-rime): `rime/rime.lua` works after a small
-  path tweak (`HOME` + the platform separator), but the reader and the control panel are
-  Windows-only.
+- Other Rime front ends (Squirrel, ibus-rime, fcitx5-rime): `rime/rime.lua` is already
+  cross-platform (it uses `HOME` and the right path separator). The macOS reader and menu bar
+  item live in [macos/](macos/README.md); on Linux only the Lua half is usable today.
 
 ### Voice
 
@@ -115,6 +124,15 @@ voices. The panel's **刷新检测 (Refresh)** button reports the same facts.
 > There are no `PSVersion` / framework guards in the code — whether it runs depends on the
 > environment.
 
+### macOS
+
+- **macOS 13+** with **Squirrel 1.x** (the official build already bundles `librime-lua`; no
+  plugin build required).
+- **Xcode Command Line Tools** (`xcode-select --install`) — only to compile the two Swift
+  binaries; no Xcode needed at runtime.
+- Voice: the built-in `Tingting` (zh-CN); `rime-tts voices` lists them all.
+- Self-check: `rime-tts check`. Full guide: [macos/README.md](macos/README.md).
+
 ---
 
 ## Install
@@ -130,8 +148,7 @@ voices. The panel's **刷新检测 (Refresh)** button reports the same facts.
 
    ```yaml
    patch:
-     engine/processors/+:
-       - lua_processor@tts_reporter
+     "engine/processors/@before 0": "lua_processor@tts_reporter"
    ```
 
 3. Copy the Windows side to a stable location (example: `%USERPROFILE%`):
@@ -150,6 +167,19 @@ voices. The panel's **刷新检测 (Refresh)** button reports the same facts.
 
 `install.ps1` automates steps 1, 3 and 5 (it does not edit your schemas for you).
 
+### macOS
+
+```sh
+cd macos
+./install.sh --patch --menubar   # build + install + patch schemas + start + open the control panel
+rime-tts reload                  # or Squirrel menu -> 重新部署
+```
+
+`install.sh` installs into `~/.rime-tts-readback/` (binaries, config, log), copies `rime.lua`
+into `~/Library/Rime/` and creates `~/Library/Rime/tts_queue/`. Without `--patch`, the
+**部署到 Rime** button in the control panel does the same.
+Details: [macos/README.md](macos/README.md).
+
 ---
 
 ## Usage
@@ -160,6 +190,9 @@ voices. The panel's **刷新检测 (Refresh)** button reports the same facts.
 | Stop / start the background watcher | `Rime_tts_stop.bat` / `Rime_tts_start.bat` |
 | Auto-start at logon | put a shortcut to `Rime_tts_start.bat` in `shell:startup` |
 | Remove completely | `Rime_tts_stop.bat`, delete `%APPDATA%\Rime\rime.lua`, drop the `lua_processor@tts_reporter` lines, redeploy |
+
+On macOS the equivalents are `rime-tts off/on/stop/start`, the **登录时自动启动** item and
+`uninstall.sh`.
 
 ## Uninstall
 
@@ -216,6 +249,26 @@ powershell -STA -File RimeTtsReadback.Gui.ps1 -Check   # print a detection repor
 powershell -STA -File RimeTtsReadback.Gui.ps1          # open the window
 ```
 
+### macOS control panel
+
+The macOS build has a native panel with the same jobs: `rime-tts panel`, or
+**打开控制面板…** in the menu bar item.
+
+- Detect, one-click install, deploy to Rime, mute, start/stop the reader, remove, redeploy;
+- voice (with preview), rate, volume, grouping window, max wait, char-by-char, ASCII/digits;
+- program filter: all / only these / except these, picked from the running applications
+  with icons (stored as bundle ids);
+- launch at login, global hotkey `⌃⌥R` (registered with Carbon, no Accessibility permission
+  needed), open log/config, about;
+- every change is written to `config.json` and hot-reloaded by the reader within ~1 s.
+
+Closing the window just goes back to the menu bar (the Dock icon appears while it is open and
+disappears again on close); the reader, the hotkey and the menu bar keep working.
+The panel is part of the same binary (`main.swift` + `RimeTtsMenuBar.swift` +
+`RimeTtsPanel.swift` + `RimeTtsModel.swift`).
+There are no `Threshold` / `PadMs` / `BreakMs` controls: those belong to the Windows WAV
+rendering path, and macOS feeds `AVSpeechUtterance` directly.
+
 ## Configuration
 
 Edit the parameters at the top of `windows\Rime_tts_watcher.ps1`, then restart the watcher.
@@ -241,16 +294,25 @@ The log lives at `%USERPROFILE%\Rime_tts_watcher.log` (rotated at 1 MB).
 ```
 rime-tts-readback/
 ├─ rime/
-│  ├─ rime.lua                          # commit_notifier -> queue file (goes to %APPDATA%\Rime)
+│  ├─ rime.lua                          # commit_notifier -> queue file (shared by Windows/macOS)
 │  ├─ wubi86.custom.yaml.example        # example schema patch
 │  └─ wubi_pinyin.custom.yaml.example
-├─ windows/
+├─ windows/                             # Windows implementation
 │  ├─ RimeTtsReadback.Gui.ps1           # WinForms control panel
 │  ├─ RimeTtsReadback.bat               # launcher for the GUI
 │  ├─ Rime_tts_watcher.ps1              # resident low-latency watcher / speaker
 │  ├─ Rime_tts_start.bat / Rime_tts_stop.bat
 │  ├─ Rime_tts_stop.ps1
 │  └─ Rime_tts_off.bat / Rime_tts_on.bat
+├─ macos/                               # macOS implementation (Squirrel)
+│  ├─ RimeTtsWatcher.swift              # resident reader (AVSpeechSynthesizer)
+│  ├─ main.swift                        # entry point
+│  ├─ RimeTtsMenuBar.swift              # menu bar item + deploy/remove + panel actions
+│  ├─ RimeTtsPanel.swift                # control panel window (AppKit)
+│  ├─ RimeTtsModel.swift                # state snapshot + config.json I/O
+│  ├─ rime-tts                          # command line
+│  ├─ build.sh / install.sh / uninstall.sh
+│  └─ README.md
 ├─ icons/
 │  ├─ rime-tts-readback.ico             # app icon (sound waves + keyboard)
 │  ├─ tray-ok.ico / tray-warn.ico / tray-off.ico
@@ -258,17 +320,27 @@ rime-tts-readback/
 │  ├─ make-icons.ps1                    # regenerates icons/ (GDI+, multi-size DIB)
 │  ├─ build-release.ps1                 # portable zip  -> dist/rime-tts-readback-<v>.zip
 │  └─ build-exe.ps1                     # single-file exe -> dist/RimeTtsReadback-<v>.exe
-├─ .github/workflows/build.yml          # CI: builds zip + exe, publishes release assets
-├─ install.ps1
-└─ uninstall.ps1
+├─ .github/workflows/build.yml          # CI: Windows zip/exe + macOS binary build check
+├─ install.ps1 / uninstall.ps1
+└─ README.md / README.en.md
 ```
 
 ## Known limitations
 
-- **Only text that is *committed* through Rime is spoken.** Text typed directly (ASCII
-  pass-through, or apps that bypass the IME) does not emit a commit event, so it never
-  reaches the queue and is not read. This is by design — it is exactly what keeps the
-  candidate window's pre-edit letters silent.
+- **Only text that is *committed* through Rime is spoken** (bare digits are the one
+  exception, see below). Text typed directly (ASCII pass-through, or apps that bypass
+  the IME) does not emit a commit event, so it never reaches the queue and is not read.
+  This is by design — it is exactly what keeps the candidate window's pre-edit letters
+  silent.
+- **Bare digits** (0-9 typed while not composing) are reported directly by `rime.lua`:
+  Rime rejects them and the front end inserts them, so no commit event fires. The
+  processor sits first in `engine/processors` and still lets the key through, so typing
+  and candidate selection are unchanged. Digits are read **one by one** (`12` → "one, two",
+  never "twelve"), separated by a short space and spoken slightly faster; a burst of digits
+  is merged into one utterance first so it does not hold up the next Chinese text. Letters
+  typed in Squirrel's ASCII mode are reported the same way and **spelled out letter by
+  letter** (`abc` → a b c, `abc123` → a b c 1 2 3). Letters typed with the system ABC
+  layout are still invisible to the input method and are not read.
 - Output is character-by-character by design (proof-reading aid), so a long sentence
   takes as long as it takes to say. It cannot be faster than speech.
 - The design deliberately never spawns a process from inside the input method. An early
@@ -279,6 +351,11 @@ rime-tts-readback/
 - **Do not use SSML `<break>` with Chinese text.** SAPI's Chinese engine has a bug: a `<break>`
   inside Chinese text makes it repeat the last syllable ("作为" → "作为为"), regardless of the
   break time. That is why the per-character mode uses a **comma** for the pause instead.
+- On macOS the engine is different: `Rate` / `Volume` do not map to SAPI's numbers, so tune by
+  ear (试听). `say(1)` costs ~0.8–1.4 s per invocation (measured), which is why the reader keeps
+  a resident `AVSpeechSynthesizer`; use `rime-tts start` if you kill it. The two macOS binaries
+  are compiled locally and **unsigned** — fine for personal use, code signing + notarisation
+  needed to distribute them.
 
 ## Build & release
 
@@ -292,9 +369,12 @@ powershell -ExecutionPolicy Bypass -File tools\build-exe.ps1       # dist\RimeTt
   `csc.exe` that ships with Windows (no downloads). On run it extracts to
   `%LOCALAPPDATA%\RimeTtsReadback\<version>\` (only when the version/content changes) and
   launches the control panel; command-line arguments are forwarded to the GUI script.
+- macOS: `macos/build.sh` compiles the two Swift binaries with `swiftc` (Xcode command line
+  tools required). They are unsigned, shipped as source and built locally.
 
-CI: `.github/workflows/build.yml` builds both on every push to `main`, uploads them as
-artifacts, and — for `v*` tags — attaches them to the GitHub release.
+CI: `.github/workflows/build.yml` builds the Windows zip + exe on every push to `main`, compiles
+the macOS binaries on `macos-14`, uploads the artifacts, and — for `v*` tags — attaches the
+Windows assets to the GitHub release.
 
 ## License
 

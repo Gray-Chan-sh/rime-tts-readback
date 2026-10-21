@@ -13,3 +13,6 @@ desktop.ini
 *.tmp
 .vscode/
 .idea/
+
+# macOS build output
+bin/

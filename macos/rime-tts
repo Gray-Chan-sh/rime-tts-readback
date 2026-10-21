@@ -1,0 +1,244 @@
+#!/bin/sh
+# rime-tts - command line control for rime-tts-readback on macOS.
+#
+#   rime-tts start | stop | restart     background reader
+#   rime-tts on | off | toggle          mute flag
+#   rime-tts status                     one-line state report
+#   rime-tts check                      full detection report
+#   rime-tts voices                     list installed speech voices
+#   rime-tts log [-f]                   open (or follow) the log
+#   rime-tts config                     open the config file
+#   rime-tts menubar                    start the menu bar item and open the panel
+#   rime-tts panel                      open the control panel (start it if needed)
+#   rime-tts patch | unpatch            add/remove the schema patch
+#   rime-tts deploy | remove            full deploy / removal (same as the menu)
+#   rime-tts reload                     ask Squirrel to redeploy
+#
+# Layout (override with RIME_TTS_STATE / RIME_USER_DIR / RIME_TTS_DIR):
+#   state  ~/.rime-tts-readback        binaries, config, log, pid
+#   Rime   ~/Library/Rime              rime.lua, tts_queue, tts_off
+
+set -u
+
+HOME_DIR="${HOME:-$(cd ~ && pwd)}"
+STATE_DIR="${RIME_TTS_STATE:-$HOME_DIR/.rime-tts-readback}"
+RIME_DIR="${RIME_USER_DIR:-$HOME_DIR/Library/Rime}"
+QUEUE_DIR="${RIME_TTS_DIR:-$RIME_DIR/tts_queue}"
+OFF_FILE="$RIME_DIR/tts_off"
+CONFIG="$STATE_DIR/config.json"
+LOG="$STATE_DIR/watcher.log"
+PID="$STATE_DIR/watcher.pid"
+BIN_DIR="$STATE_DIR/bin"
+WATCHER="$BIN_DIR/rime-tts-watcher"
+MENUBAR_BIN="$BIN_DIR/rime-tts-menubar"
+SQUIRREL="/Library/Input Methods/Squirrel.app/Contents/MacOS/Squirrel"
+
+say() { printf '%s\n' "$*"; }
+die() { printf '%s\n' "$*" >&2; exit 1; }
+
+watcher_pid() {
+  [ -f "$PID" ] || return 1
+  pid=$(cat "$PID" 2>/dev/null | tr -dc '0-9')
+  [ -n "$pid" ] || return 1
+  kill -0 "$pid" 2>/dev/null || return 1
+  printf '%s' "$pid"
+}
+
+cmd_start() {
+  [ -x "$WATCHER" ] || die "找不到朗读器 $WATCHER（先运行 install.sh）"
+  if pid=$(watcher_pid); then say "后台朗读已在运行 (pid $pid)"; return 0; fi
+  mkdir -p "$STATE_DIR" "$QUEUE_DIR"
+  nohup "$WATCHER" --quiet >/dev/null 2>&1 &
+  sleep 0.4
+  if pid=$(watcher_pid); then say "已启动后台朗读 (pid $pid)"; else say "启动失败，请查看 $LOG"; fi
+}
+
+cmd_stop() {
+  if ! pid=$(watcher_pid); then say "后台朗读未在运行"; return 0; fi
+  kill -TERM "$pid" 2>/dev/null
+  i=0
+  while kill -0 "$pid" 2>/dev/null && [ "$i" -lt 40 ]; do sleep 0.05; i=$((i + 1)); done
+  say "已停止后台朗读 (pid $pid)"
+}
+
+cmd_off() { mkdir -p "$RIME_DIR"; printf '1' >"$OFF_FILE"; say "已静音（rime.lua 不再写入）"; }
+cmd_on() {
+  rm -f "$OFF_FILE"; say "已取消静音"
+  cmd_start >/dev/null
+}
+
+cmd_status() {
+  if pid=$(watcher_pid); then w="运行中 (pid $pid)"; else w="已停止"; fi
+  if [ -e "$OFF_FILE" ]; then m="已静音"; else m="未静音"; fi
+  if [ -f "$RIME_DIR/rime.lua" ] && grep -q tts_reporter "$RIME_DIR/rime.lua" 2>/dev/null; then l="已安装"; else l="未安装"; fi
+  n=$(grep -l 'lua_processor@tts_reporter' "$RIME_DIR"/*.custom.yaml 2>/dev/null | wc -l | tr -d ' ')
+  say "后台朗读 : $w"
+  say "静音     : $m"
+  say "rime.lua : $l"
+  say "已打补丁 : $n 个 *.custom.yaml"
+  say "队列目录 : $QUEUE_DIR"
+}
+
+cmd_patch() {
+  [ -d "$RIME_DIR" ] || die "没有 $RIME_DIR"
+  for f in "$RIME_DIR"/*.custom.yaml; do
+    [ -e "$f" ] || continue
+    if grep -q '@before 0.*lua_processor@tts_reporter' "$f" 2>/dev/null; then
+      say "已有补丁: $(basename "$f")"
+      continue
+    fi
+    tmp="$f.tmp.$$"
+    awk '
+      { lines[n++] = $0 }
+      END {
+        inserted = 0
+        for (i = 0; i < n; i++) {
+          # drop our old block and any leftover processor line
+          if (lines[i] ~ /rime-tts-readback/ || lines[i] ~ /lua_processor@tts_reporter/) continue
+          # drop an "engine/processors/+:" whose list only held our entry
+          if (lines[i] ~ /^[[:space:]]*engine\/processors\/\+:[[:space:]]*$/) {
+            j = i + 1
+            while (j < n && (lines[j] ~ /^[[:space:]]*$/ || lines[j] ~ /^[[:space:]]*#/ ||
+                   lines[j] ~ /rime-tts-readback/ || lines[j] ~ /lua_processor@tts_reporter/)) j++
+            if (j >= n || lines[j] !~ /^[[:space:]]*-/) {
+              while (i + 1 < n && (lines[i+1] ~ /^[[:space:]]*$/ || lines[i+1] ~ /^[[:space:]]*#/ ||
+                     lines[i+1] ~ /rime-tts-readback/ || lines[i+1] ~ /lua_processor@tts_reporter/)) i++
+              continue
+            }
+          }
+          print lines[i]
+          if (!inserted && lines[i] ~ /^patch:[[:space:]]*$/) {
+            print "  # >>> rime-tts-readback >>>"
+            print "  \"engine/processors/@before 0\": \"lua_processor@tts_reporter\""
+            print "  # <<< rime-tts-readback <<<"
+            inserted = 1
+          }
+        }
+        if (!inserted) {
+          print ""
+          print "patch:"
+          print "  # >>> rime-tts-readback >>>"
+          print "  \"engine/processors/@before 0\": \"lua_processor@tts_reporter\""
+          print "  # <<< rime-tts-readback <<<"
+        }
+      }
+    ' "$f" >"$tmp" && mv "$tmp" "$f"
+    say "已加入补丁: $(basename "$f")"
+  done
+}
+
+cmd_unpatch() {
+  [ -d "$RIME_DIR" ] || return 0
+  for f in "$RIME_DIR"/*.custom.yaml; do
+    [ -e "$f" ] || continue
+    grep -q 'lua_processor@tts_reporter' "$f" 2>/dev/null || continue
+    tmp="$f.tmp.$$"
+    awk '
+      /rime-tts-readback/         { next }
+      /lua_processor@tts_reporter/ { next }
+      { lines[n++] = $0 }
+      END {
+        for (i = 0; i < n; i++) {
+          if (lines[i] ~ /^[[:space:]]*engine\/processors\/\+:[[:space:]]*$/) {
+            j = i + 1
+            while (j < n && (lines[j] ~ /^[[:space:]]*$/ || lines[j] ~ /^[[:space:]]*#/)) j++
+            if (j >= n || lines[j] !~ /^[[:space:]]*-/) continue
+          }
+          print lines[i]
+        }
+      }
+    ' "$f" >"$tmp" && mv "$tmp" "$f"
+    say "已移除补丁: $(basename "$f")"
+  done
+}
+
+cmd_reload() {
+  if [ -x "$SQUIRREL" ]; then
+    "$SQUIRREL" --reload && say "已重新部署 Rime" || say "重新部署失败"
+  else
+    say "未找到 Squirrel，请手动重新部署"
+  fi
+}
+
+cmd_log() {
+  [ -f "$LOG" ] || : >"$LOG"
+  if [ "${1:-}" = "-f" ]; then tail -f "$LOG"; else open -t "$LOG"; fi
+}
+
+cmd_config() {
+  if [ ! -f "$CONFIG" ]; then
+    mkdir -p "$STATE_DIR"
+    cat >"$CONFIG" <<'JSON'
+{
+  "Voice": "Tingting",
+  "Rate": 0,
+  "IdleMs": 60,
+  "MaxWaitMs": 200,
+  "Volume": 100,
+  "CharByChar": false,
+  "ReadDigits": true,
+  "ReadEnglish": true,
+  "AppFilterMode": "all",
+  "AppFilterList": [],
+  "HotKey": ""
+}
+JSON
+  fi
+  open -t "$CONFIG"
+}
+
+cmd_menubar() {
+  [ -x "$MENUBAR_BIN" ] || die "找不到 $MENUBAR_BIN（先运行 install.sh）"
+  nohup "$MENUBAR_BIN" >/dev/null 2>&1 &
+  sleep 0.3
+  say "菜单栏图标已启动"
+}
+
+cmd_panel() {
+  [ -x "$MENUBAR_BIN" ] || die "找不到 $MENUBAR_BIN（先运行 install.sh）"
+  pid=""
+  [ -f "$STATE_DIR/menubar.pid" ] && pid=$(cat "$STATE_DIR/menubar.pid" 2>/dev/null | tr -dc '0-9')
+  if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+    # ask the running instance to show its window
+    "$MENUBAR_BIN" --show >/dev/null 2>&1
+    say "已打开控制面板"
+  else
+    nohup "$MENUBAR_BIN" >/dev/null 2>&1 &
+    say "已启动控制面板"
+  fi
+}
+
+cmd_deploy() {
+  [ -x "$MENUBAR_BIN" ] || die "找不到 $MENUBAR_BIN（先运行 install.sh）"
+  "$MENUBAR_BIN" --deploy
+}
+
+cmd_remove() {
+  [ -x "$MENUBAR_BIN" ] || die "找不到 $MENUBAR_BIN（先运行 install.sh）"
+  "$MENUBAR_BIN" --remove
+}
+
+case "${1:-status}" in
+  start)   cmd_start ;;
+  stop)    cmd_stop ;;
+  restart) cmd_stop; cmd_start ;;
+  on)      cmd_on ;;
+  off)     cmd_off ;;
+  toggle)  if [ -e "$OFF_FILE" ]; then cmd_on; else cmd_off; fi ;;
+  status)  cmd_status ;;
+  check)   "$WATCHER" --check ;;
+  voices)  "$WATCHER" --list-voices ;;
+  log)     shift; cmd_log "${1:-}" ;;
+  config)  cmd_config ;;
+  menubar) cmd_menubar ;;
+  panel)   cmd_panel ;;
+  deploy)  cmd_deploy ;;
+  remove)  cmd_remove ;;
+  patch)   cmd_patch ;;
+  unpatch) cmd_unpatch ;;
+  reload)  cmd_reload ;;
+  -h|--help|help)
+    sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'
+    ;;
+  *) die "unknown command: $1 (try: rime-tts help)" ;;
+esac

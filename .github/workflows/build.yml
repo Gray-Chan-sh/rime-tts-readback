@@ -19,6 +19,23 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # Catches typos in the .ps1 sources without running them (the reader needs a
+      # real Windows desktop session, so it cannot be executed on CI).
+      - name: Parse PowerShell scripts
+        shell: pwsh
+        run: |
+          $failed = $false
+          Get-ChildItem -Path . -Recurse -Filter *.ps1 | ForEach-Object {
+            $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile(
+              $_.FullName, [ref]$null, [ref]$errors)
+            if ($errors) {
+              $failed = $true
+              Write-Host "::error file=$($_.FullName)::$($errors[0].Message)"
+            }
+          }
+          if ($failed) { exit 1 }
+
       - name: Build portable zip
         shell: pwsh
         run: ./tools/build-release.ps1
@@ -46,3 +63,26 @@ jobs:
           generate_release_notes: true
           draft: false
           prerelease: false
+
+  macos:
+    runs-on: macos-14
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build macOS binaries
+        run: ./macos/build.sh "$RUNNER_TEMP/bin"
+
+      - name: Smoke test (compile + CLI, no audio)
+        run: |
+          "$RUNNER_TEMP/bin/rime-tts-watcher" --help >/dev/null
+          "$RUNNER_TEMP/bin/rime-tts-menubar" --status >/dev/null
+          for f in macos/*.sh macos/rime-tts; do sh -n "$f"; done
+
+      - name: Upload macOS artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: rime-tts-readback-macos
+          path: ${{ runner.temp }}/bin/*
+          if-no-files-found: error

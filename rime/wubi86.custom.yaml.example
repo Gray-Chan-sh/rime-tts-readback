@@ -2,5 +2,4 @@
 patch:
   translator/enable_sentence: false   # 关闭整句联想（五笔一般不需要）
   translator/enable_user_dict: true   # 保留自造词
-  engine/processors/+:
-    - lua_processor@tts_reporter      # 上屏文字写入队列（见 rime.lua）
+  "engine/processors/@before 0": "lua_processor@tts_reporter"   # 上屏文字写入队列（见 rime.lua）

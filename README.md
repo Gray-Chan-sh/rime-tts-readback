@@ -10,6 +10,9 @@
 在 **小狼毫 / Weasel 0.17.4**（librime 1.13.1）上开发与验证，中文语音使用
 `Microsoft Huihui Desktop`。
 
+macOS 上用**鼠须管 Squirrel** + 系统语音（`Tingting`），见 [macos/README.md](macos/README.md)。
+两边共用同一个 Lua 上报层，只有「朗读器」按平台各写一份。
+
 ---
 
 ## 为什么不用现成的读屏软件？
@@ -34,6 +37,10 @@
                  ├─ 裁掉 SAPI 首尾的静音
                  └─ 用 SoundPlayer 播放裁剪后的 WAV  → 立即出声
 ```
+
+> 上图是 Windows 的链路。macOS 版共用前半段（`rime.lua` → 队列文件），后半段换成常驻的
+> `AVSpeechSynthesizer`：没有 SAPI 的前后静音，也没有 `SoundPlayer`，因此**不需要**合成 WAV、
+> 裁静音、归一化。细节见 [macos/README.md](macos/README.md)。
 
 ### 低延迟的关键
 
@@ -77,7 +84,9 @@ Windows SAPI 的"默认音频输出"看起来慢，其实不然：
 - 需要**带 lua 插件（librime-lua）**的 Rime 前端：`lua_processor` / `rime.lua` 必须能用。
   - 已用 **Weasel 0.17.4 / librime 1.13.1** 验证；更早版本未逐个测试。
   - 快速自检：安装目录的 `rime.dll` 里含 `lua_processor` 字样。
-- 其它前端（鼠须管 Squirrel、ibus-rime、fcitx5-rime）：`rime/rime.lua` 稍改路径（`HOME` + 平台分隔符）即可用，但朗读器与控制面板是 Windows 专属。
+- 其它前端（鼠须管 Squirrel、ibus-rime、fcitx5-rime）：`rime/rime.lua` 已经是跨平台的
+  （自动使用 `HOME` 与正确的路径分隔符），macOS 的朗读器与控制面板见 [macos/README.md](macos/README.md)；
+  Linux 目前只有 Lua 部分可直接用。
 
 ### 语音
 
@@ -101,6 +110,13 @@ powershell -STA -File RimeTtsReadback.Gui.ps1 -Check
 
 > 代码里没有 `PSVersion` / 框架的硬性检查——能不能跑取决于实际环境。
 
+### macOS
+
+- **macOS 13 及以上**，鼠须管 **Squirrel 1.x**（官方包内置 `librime-lua`，无需自己编译插件）。
+- **Xcode Command Line Tools**（`xcode-select --install`）——只在构建时用来跑 `swiftc`，日常运行不需要 Xcode。
+- 语音用系统自带的 `Tingting`（zh-CN），`rime-tts voices` 可列出全部可用语音。
+- 自检：`rime-tts check`。完整说明见 [macos/README.md](macos/README.md)。
+
 ---
 
 ## 安装
@@ -115,8 +131,7 @@ powershell -STA -File RimeTtsReadback.Gui.ps1 -Check
 
    ```yaml
    patch:
-     engine/processors/+:
-       - lua_processor@tts_reporter
+     "engine/processors/@before 0": "lua_processor@tts_reporter"
    ```
 
 3. 把 Windows 部分复制到一个固定位置（例如 `%USERPROFILE%`）：
@@ -135,6 +150,18 @@ powershell -STA -File RimeTtsReadback.Gui.ps1 -Check
 
 `install.ps1` 可自动完成第 1、3、5 步（它不会替你改方案补丁）。
 
+### macOS
+
+```sh
+cd macos
+./install.sh --patch --menubar   # 编译 + 安装 + 打补丁 + 启动后台 + 打开控制面板
+rime-tts reload                  # 或菜单栏「ㄓ」→ 重新部署
+```
+
+`install.sh` 会装到 `~/.rime-tts-readback/`（可执行文件、配置、日志），把 `rime.lua` 放进
+`~/Library/Rime/`，并建好 `~/Library/Rime/tts_queue/`。不想用 `--patch` 的话，控制面板里的
+「部署到 Rime」按钮做同样的事。详见 [macos/README.md](macos/README.md)。
+
 ---
 
 ## 用法
@@ -145,6 +172,8 @@ powershell -STA -File RimeTtsReadback.Gui.ps1 -Check
 | 停止 / 启动后台朗读 | `Rime_tts_stop.bat` / `Rime_tts_start.bat` |
 | 开机自启 | 把 `Rime_tts_start.bat` 的快捷方式放进 `shell:startup` |
 | 彻底移除 | `Rime_tts_stop.bat`，删除 `%APPDATA%\Rime\rime.lua`，去掉 `lua_processor@tts_reporter` 那几行，再重新部署 |
+
+macOS 上对应的是 `rime-tts off/on/stop/start`、菜单栏图标里的「开机自启」和 `uninstall.sh`。
 
 ## 卸载
 
@@ -182,6 +211,20 @@ powershell -STA -File RimeTtsReadback.Gui.ps1 -Check   # 打印检测报告
 powershell -STA -File RimeTtsReadback.Gui.ps1          # 打开窗口
 ```
 
+### macOS 控制面板
+
+macOS 版有一个功能对应的原生面板：`rime-tts panel`，或点菜单栏图标里的「打开控制面板…」。
+
+- 状态检测、一键安装、部署到 Rime、静音、停止/启动后台、删除回读、仅重新部署；
+- 语音（带试听）、语速、音量、合并窗口、最长等待、逐字朗读、英文/数字；
+- 程序筛选：全部 / 仅这些 / 除这些，可从正在运行的程序里带图标勾选（存 bundle id）；
+- 登录自启、全局快捷键 `⌃⌥R`（Carbon 注册，不需要辅助功能权限）、打开日志/配置、关于；
+- 改参数即写 `config.json`，朗读器约 1 秒内热加载。
+
+窗口关掉就退回菜单栏，后台朗读和快捷键不受影响。面板和菜单栏是同一个程序
+（`main.swift` + `RimeTtsMenuBar.swift` + `RimeTtsPanel.swift` + `RimeTtsModel.swift` 编译而成）。
+macOS 不需要 Windows 那套 WAV 裁剪参数，所以面板里没有 `Threshold` / `PadMs` / `BreakMs`。
+
 ## 配置
 
 可以直接改 `windows\Rime_tts_watcher.ps1` 顶部的参数，然后重启朗读器。
@@ -206,16 +249,25 @@ powershell -STA -File RimeTtsReadback.Gui.ps1          # 打开窗口
 ```
 rime-tts-readback/
 ├─ rime/
-│  ├─ rime.lua                          # commit_notifier -> 队列文件（放到 %APPDATA%\Rime）
+│  ├─ rime.lua                          # commit_notifier -> 队列文件（Windows 与 macOS 通用）
 │  ├─ wubi86.custom.yaml.example        # 方案补丁示例
 │  └─ wubi_pinyin.custom.yaml.example
-├─ windows/
+├─ windows/                             # Windows 实现
 │  ├─ RimeTtsReadback.Gui.ps1           # WinForms 控制面板
 │  ├─ RimeTtsReadback.bat               # 面板启动器
 │  ├─ Rime_tts_watcher.ps1              # 常驻低延迟朗读器
 │  ├─ Rime_tts_start.bat / Rime_tts_stop.bat
 │  ├─ Rime_tts_stop.ps1
 │  └─ Rime_tts_off.bat / Rime_tts_on.bat
+├─ macos/                               # macOS 实现（鼠须管）
+│  ├─ RimeTtsWatcher.swift              # 常驻朗读器（AVSpeechSynthesizer）
+│  ├─ main.swift                        # 程序入口
+│  ├─ RimeTtsMenuBar.swift              # 菜单栏图标 + 部署/移除 + 面板动作
+│  ├─ RimeTtsPanel.swift                # 控制面板窗口（AppKit）
+│  ├─ RimeTtsModel.swift                # 状态快照 + config.json 读写
+│  ├─ rime-tts                          # 命令行
+│  ├─ build.sh / install.sh / uninstall.sh
+│  └─ README.md
 ├─ icons/
 │  ├─ rime-tts-readback.ico             # 应用图标（声波 + 键盘）
 │  ├─ tray-ok.ico / tray-warn.ico / tray-off.ico
@@ -223,19 +275,23 @@ rime-tts-readback/
 │  ├─ make-icons.ps1                    # 重新生成 icons/（GDI+，多尺寸 DIB）
 │  ├─ build-release.ps1                 # 便携 zip  -> dist/rime-tts-readback-<v>.zip
 │  └─ build-exe.ps1                     # 单文件 exe -> dist/RimeTtsReadback-<v>.exe
-├─ .github/workflows/build.yml          # CI：构建 zip + exe 并发布到 Release
-├─ install.ps1
-└─ uninstall.ps1
+├─ .github/workflows/build.yml          # CI：构建 Windows zip/exe，并编译检查 macOS 二进制
+├─ install.ps1 / uninstall.ps1
+└─ README.md / README.en.md
 ```
 
 ## 已知限制
 
-- **只有经 Rime 上屏(commit)的内容才会被朗读。** 直接输入（ASCII 直通、或绕过输入法的程序）不会产生 commit 事件，因此不会进队列、也不会被朗读。这是**有意为之**——正是它保证了候选窗里的编码不被读出。
+- **只有经 Rime 上屏(commit)的内容才会被朗读**（裸数字除外，见下）。直接输入（ASCII 直通、或绕过输入法的程序）不会产生 commit 事件，因此不会进队列、也不会被朗读。这是**有意为之**——正是它保证了候选窗里的编码不被读出。
 - 输出是**逐字**的（面向校对），所以长句就是需要那么久，无法比语音本身更快。
 - 设计上**绝不在输入法内部启动进程**。早期版本在 commit 回调里用 `os.execute()`，会阻塞输入法线程、甚至冻住整个桌面。**不要在 Lua 路径里放任何阻塞操作。**
-- 数字/英文只有在**经输入法上屏**时才会读；直接敲的不会（同上）。
+- **裸数字**是唯一例外：没在组字时按下的 0-9 由 `rime.lua` 直接补报进队列（处理器放在 `engine/processors` 最前面，按键照常放行，不影响输入，也不会在读候选时误报）。数字**逐个读**（`12` → 「一、二」），数字间用短空格、语速略快，连续数字先合并再逐位念；鼠须管英文模式下敲的字母同样会补报，并按字母逐个念（`abc` → a b c）；直接敲的中文拼音和系统 ABC 输入法下的字母仍然不读。
 - 程序筛选依赖"当前前台窗口"，极快切换程序时可能极小概率误判。
 - **不要在中文里用 SSML 的 `<break>`**：SAPI 的中文引擎有 bug——中文文本中插入 `<break>` 会让它把最后一个音节再念一遍（"作为" → "作为为"），且与 break 时长无关。所以"逐字朗读"改用**逗号**来产生停顿。
+- macOS 用的是另一套语音引擎：`Rate`/`Volume` 与 SAPI 的数值**不能直接对照**，先用「试听」调到顺耳。
+- macOS 的 `say(1)` 每次调用有约 0.8–1.4 秒的启动开销（实测），所以朗读器用的是常驻的
+  `AVSpeechSynthesizer`；朗读器若被手动杀掉，用 `rime-tts start` 重启（菜单栏图标也会自动看护）。
+- macOS 的两个二进制是本地编译、**未签名**的。自己用没问题，分发给别人需要签名 + 公证。
 
 ## 构建与发布
 
@@ -248,9 +304,11 @@ powershell -ExecutionPolicy Bypass -File tools\build-exe.ps1       # dist\RimeTt
 - `build-exe.ps1` 把全部内容打包成**单文件自解压 exe**，用 Windows 自带的 `csc.exe` 编译（无需下载）。
   运行时释放到 `%LOCALAPPDATA%\RimeTtsReadback\<版本>\`（仅当版本/内容变化时），然后启动控制面板；
   命令行参数会转发给 GUI 脚本。
+- macOS 侧：`macos/build.sh` 用 `swiftc` 编译两个二进制（需要 Xcode Command Line Tools）；
+  macOS 的二进制不签名，随源码分发、由用户本地编译。
 
-CI：`.github/workflows/build.yml` 在每次推送到 `main` 时构建两者并上传为 artifacts；对 `v*` 标签，
-还会把它们挂到对应的 GitHub Release。
+CI：`.github/workflows/build.yml` 在每次推送到 `main` 时构建 Windows 的 zip + exe，并在 `macos-14`
+上编译检查 macOS 二进制；对 `v*` 标签，还会把产物挂到对应的 GitHub Release。
 
 ## 许可证
 

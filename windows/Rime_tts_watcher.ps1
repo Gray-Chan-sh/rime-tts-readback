@@ -80,9 +80,23 @@ function Apply-VoiceRate {
 }
 Apply-VoiceRate
 
+# rime.lua names each commit "<epoch>_<seq>.txt". Sort on those two numbers, not on the
+# name: string order puts "..._10" before "..._2" and would scramble fast input.
+# The fixed-width key keeps Sort-Object happy on PowerShell 5.1 (no custom comparer).
+function Get-CommitOrder([System.IO.FileInfo]$f) {
+  $p = @($f.BaseName -split '_')
+  $t = [int64]::MaxValue
+  $s = [int64]0
+  if ($p.Count -ge 2) {
+    if ($p[0] -match '^\d+$') { $t = [int64]$p[0] }
+    if ($p[1] -match '^\d+$') { $s = [int64]$p[1] }
+  }
+  return ('{0:D19}_{1:D9}' -f $t, $s)
+}
+
 function Pending {
   @(Get-ChildItem -LiteralPath $QueueDir -Filter *.txt -File -ErrorAction SilentlyContinue |
-    Sort-Object LastWriteTime, Name)
+    Sort-Object @{ Expression = { Get-CommitOrder $_ } }, Name)
 }
 
 function ReadableChars([string]$txt) {
@@ -91,7 +105,7 @@ function ReadableChars([string]$txt) {
     if ([char]::IsWhiteSpace($ch)) { continue }
     if (-not [char]::IsLetterOrDigit($ch)) { continue }
     $u = [int][char]$ch
-    if (-not $IncludeAscii -and $u -lt 128 -and [char]::IsLetter($ch)) { continue }
+    if (-not $IncludeAscii -and $u -lt 128 -and ([char]::IsLetter($ch) -or [char]::IsNumber($ch))) { continue }
     $out += $ch
   }
   return $out

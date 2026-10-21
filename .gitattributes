@@ -6,3 +6,6 @@
 *.md text eol=lf
 *.yaml text eol=lf
 *.yml text eol=lf
+*.sh text eol=lf
+*.swift text eol=lf
+macos/rime-tts text eol=lf
