@@ -12,7 +12,7 @@ permissions:
   contents: write
 
 jobs:
-  build:
+  windows:
     runs-on: windows-latest
 
     steps:
@@ -36,33 +36,39 @@ jobs:
           }
           if ($failed) { exit 1 }
 
+      - name: Resolve version
+        id: version
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_REF_TYPE -eq 'tag') {
+            $v = $env:GITHUB_REF_NAME -replace '^v', ''
+          } else {
+            $v = 'dev-' + $env:GITHUB_SHA.Substring(0, 7)
+          }
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "value=$v"
+
       - name: Build portable zip
         shell: pwsh
-        run: ./tools/build-release.ps1
+        env:
+          VERSION: ${{ steps.version.outputs.value }}
+        run: ./tools/build-release.ps1 -Version $env:VERSION
 
       - name: Build single-file exe
         shell: pwsh
-        run: ./tools/build-exe.ps1
+        env:
+          VERSION: ${{ steps.version.outputs.value }}
+        run: ./tools/build-exe.ps1 -Version $env:VERSION
 
       - name: Show build output
         shell: pwsh
         run: Get-ChildItem dist | Select-Object Name, Length | Format-Table -AutoSize
 
-      - name: Upload artifacts
+      - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: rime-tts-readback
+          name: windows-dist
           path: dist/*
           if-no-files-found: error
-
-      - name: Publish release assets
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: dist/*
-          generate_release_notes: true
-          draft: false
-          prerelease: false
 
   macos:
     runs-on: macos-14
@@ -80,11 +86,43 @@ jobs:
           "$RUNNER_TEMP/bin/rime-tts-menubar" --status >/dev/null
           for f in macos/*.sh macos/rime-tts; do sh -n "$f"; done
 
+      - name: Resolve version
+        id: version
+        run: |
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          else
+            VERSION="dev-$(git rev-parse --short HEAD)"
+          fi
+          echo "value=$VERSION" >> "$GITHUB_OUTPUT"
+
+      # A runnable tree: the two Swift binaries plus the CLI and install script.
+      # Layout matches the repo (bin/, macos/, rime/) so `./install.sh` works.
+      - name: Package macOS app
+        env:
+          VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          set -euo pipefail
+          PKG="$RUNNER_TEMP/pkg/rime-tts-readback-$VERSION"
+          rm -rf "$RUNNER_TEMP/pkg"
+          mkdir -p "$PKG/bin"
+          cp -R macos "$PKG/macos"
+          cp -R rime "$PKG/rime"
+          cp -R icons "$PKG/icons"
+          cp README.md README.en.md LICENSE "$PKG/"
+          cp "$RUNNER_TEMP/bin/"* "$PKG/bin/"
+          printf '%s\n' "$VERSION" > "$PKG/VERSION.txt"
+          printf '#!/bin/sh\nexec "$(dirname "$0")/macos/install.sh" --no-build "$@"\n' > "$PKG/install.sh"
+          chmod +x "$PKG/install.sh"
+          mkdir -p dist
+          (cd "$RUNNER_TEMP/pkg" && zip -qry "$GITHUB_WORKSPACE/dist/rime-tts-readback-$VERSION-macos.zip" "rime-tts-readback-$VERSION")
+          ls -lh dist
+
       - name: Upload macOS artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: rime-tts-readback-macos
-          path: ${{ runner.temp }}/bin/*
+          name: macos-dist
+          path: dist/*
           if-no-files-found: error
 
   linux:
@@ -131,3 +169,71 @@ jobs:
           "$RUNNER_TEMP/inst/bin/rime-tts" status
           bash ./linux/uninstall.sh --prefix "$RUNNER_TEMP/inst" --rime-dir "$RUNNER_TEMP/rime" --no-reload -y
           test ! -e "$RUNNER_TEMP/rime/rime.lua"
+
+      - name: Resolve version
+        id: version
+        run: |
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          else
+            VERSION="dev-$(git rev-parse --short HEAD)"
+          fi
+          echo "value=$VERSION" >> "$GITHUB_OUTPUT"
+
+      # Portable tree: extract it and run ./install.sh (or linux/install.sh).
+      # Python 3 and a system TTS engine (spd-say / espeak-ng) stay external.
+      - name: Package Linux app
+        env:
+          VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          set -euo pipefail
+          PKG="$RUNNER_TEMP/pkg/rime-tts-readback-$VERSION"
+          rm -rf "$RUNNER_TEMP/pkg"
+          mkdir -p "$PKG"
+          cp -R linux rime icons "$PKG/"
+          cp README.md README.en.md LICENSE "$PKG/"
+          find "$PKG" -type d -name __pycache__ -prune -exec rm -rf {} +
+          printf '%s\n' "$VERSION" > "$PKG/VERSION.txt"
+          printf '#!/bin/sh\nexec "$(dirname "$0")/linux/install.sh" "$@"\n' > "$PKG/install.sh"
+          chmod +x "$PKG/install.sh"
+          mkdir -p dist
+          tar -czf "dist/rime-tts-readback-$VERSION-linux.tar.gz" -C "$RUNNER_TEMP/pkg" "rime-tts-readback-$VERSION"
+          ls -lh dist
+
+      - name: Upload Linux artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-dist
+          path: dist/*
+          if-no-files-found: error
+
+  # Runs only for tag pushes. Collects the three platform assets produced above
+  # and attaches them (plus a checksum file) to the GitHub Release for the tag.
+  release:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [windows, macos, linux]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download all platform artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release
+          merge-multiple: true
+
+      - name: Checksums
+        run: |
+          cd release
+          ls -lh
+          sha256sum * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Publish release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          name: rime-tts-readback ${{ github.ref_name }}
+          files: release/*
+          fail_on_unmatched_files: true
+          generate_release_notes: true
+          draft: false
+          prerelease: false
