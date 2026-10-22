@@ -1417,6 +1417,28 @@ $miClear.Add_Click({ Run-Action '清空队列（通知栏）' { , (Clear-Queue) 
 $miExit.Add_Click({
     $script:ReallyExit = $true
     $timer.Stop()
+
+    # The control panel owns the tray icon too.  If readback is still active,
+    # offer to leave it disabled instead of silently leaving a background
+    # reader running after the window disappears.
+    try {
+        $st = Get-FeatureState
+        if ($st.Watcher -and -not $st.Muted) {
+            $answer = [System.Windows.Forms.MessageBox]::Show(
+                $form,
+                "朗读功能仍在运行。`n`n退出控制面板前是否禁用朗读？`n`n选择「是」：所有朗读功能保持关闭，直到手动重新开启。`n选择「否」：保留当前状态并退出。",
+                '退出 Rime 回读',
+                [System.Windows.Forms.MessageBoxButtons]::YesNo,
+                [System.Windows.Forms.MessageBoxIcon]::Question,
+                [System.Windows.Forms.MessageBoxDefaultButton]::Button2)
+            if ($answer -eq [System.Windows.Forms.DialogResult]::Yes) {
+                Log-Lines (Disable-Readback)
+            }
+        }
+    } catch {
+        Log-Line "退出前检查朗读状态失败: $($_.Exception.Message)"
+    }
+
     try { $script:HkWnd.Unregister($script:HKId); $script:HkWnd.Dispose() } catch { }
     $notify.Visible = $false
     $notify.Dispose()

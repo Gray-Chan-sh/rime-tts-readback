@@ -755,6 +755,38 @@ let instanceLockPath = stateDir + "/menubar.pid"
 var sharedController: Controller?
 var menuSignalSources: [DispatchSourceSignal] = []
 
+// Quitting the menu bar app also removes the control panel.  If readback is
+// still active, ask whether to leave it disabled instead of silently keeping a
+// background reader alive after the UI disappears.
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    private var terminating = false
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        if terminating { return .terminateNow }
+        if isRunning && !isMuted {
+            sender.activate(ignoringOtherApps: true)
+            let alert = NSAlert()
+            alert.alertStyle = .warning
+            alert.messageText = "朗读功能仍在运行"
+            alert.informativeText = "退出 Rime 回读前是否禁用朗读？\n\n选择“禁用并退出”后，所有朗读会保持关闭，直到手动重新开启。"
+            alert.addButton(withTitle: "禁用并退出")
+            alert.addButton(withTitle: "保留并退出")
+            alert.buttons[0].keyEquivalent = ""
+            alert.buttons[1].keyEquivalent = "\r"
+            if alert.runModal() == .alertFirstButtonReturn {
+                try? fm.createDirectory(atPath: rimeDir, withIntermediateDirectories: true)
+                try? "1".write(toFile: offFile, atomically: true, encoding: .utf8)
+                stopWatcher()
+            }
+        }
+        terminating = true
+        try? fm.removeItem(atPath: instanceLockPath)
+        return .terminateNow
+    }
+}
+
+var appDelegate: AppDelegate?
+
 enum RimeTtsApp {
     static func helpText() -> String {
         """
@@ -856,6 +888,9 @@ enum RimeTtsApp {
 
         // ------------------------------------------------------------ main
         let app = NSApplication.shared
+        let delegate = AppDelegate()
+        appDelegate = delegate
+        app.delegate = delegate
         app.setActivationPolicy(.accessory)
         let controller = Controller()
         sharedController = controller

@@ -97,6 +97,11 @@ def restart_reader() -> List[str]:
     return stop_reader() + start_reader()
 
 
+def readback_active() -> bool:
+    """True while the reader is running and the mute flag is absent."""
+    return c.reader_running() and not c.OFF_FILE.exists()
+
+
 def enable() -> List[str]:
     try:
         c.OFF_FILE.unlink(missing_ok=True)

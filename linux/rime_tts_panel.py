@@ -609,6 +609,19 @@ class Panel:
             pass
 
     def on_close(self) -> None:
+        from tkinter import messagebox
+
+        if ctl.readback_active():
+            if messagebox.askyesno(
+                "退出 Rime 回读",
+                "朗读功能仍在运行。\n"
+                "退出控制面板前是否禁用朗读？\n\n"
+                "选择“是”：设置静音并停止后台朗读，直到手动重新开启。\n"
+                "选择“否”：保留当前状态并退出。",
+                parent=self.root,
+                default="no",
+            ):
+                ctl.disable()
         self._closing = True
         if self._save_job is not None:
             try:
