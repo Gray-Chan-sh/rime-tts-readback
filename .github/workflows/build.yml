@@ -263,11 +263,61 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # Needed for CHANGELOG.md and for finding the previous tag.
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
       - name: Download all platform artifacts
         uses: actions/download-artifact@v4
         with:
           path: release
           merge-multiple: true
+
+      # Turn the matching CHANGELOG section into the release body.  If the tag
+      # has no section yet, fall back to the commit list instead of the bare
+      # "Full Changelog" link that GitHub generates for direct commits.
+      - name: Build release notes
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          PREV="$(git describe --tags --abbrev=0 "${GITHUB_REF_NAME}^" 2>/dev/null || true)"
+
+          if [ -f CHANGELOG.md ]; then
+            awk -v ver="$VERSION" '
+              $0 ~ "^## " ver "([[:space:]]|$)" { found = 1; next }
+              found && /^## / { exit }
+              found { print }
+            ' CHANGELOG.md > release-body.md
+          else
+            : > release-body.md
+          fi
+
+          if [ ! -s release-body.md ]; then
+            {
+              echo "## 变更"
+              echo
+              if [ -n "$PREV" ]; then
+                git log --no-merges --pretty='- %s (%h)' "$PREV..$GITHUB_REF_NAME"
+              else
+                git log --no-merges --pretty='- %s (%h)' -20
+              fi
+            } > release-body.md
+          else
+            {
+              echo "## 变更"
+              echo
+              cat release-body.md
+            } > release-body.tmp
+            mv release-body.tmp release-body.md
+          fi
+
+          if [ -n "$PREV" ]; then
+            echo >> release-body.md
+            echo "**Full Changelog**: https://github.com/${GITHUB_REPOSITORY}/compare/${PREV}...${GITHUB_REF_NAME}" >> release-body.md
+          fi
+          cat release-body.md
 
       - name: Checksums
         run: |
@@ -280,8 +330,8 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           name: rime-tts-readback ${{ github.ref_name }}
+          body_path: release-body.md
           files: release/*
           fail_on_unmatched_files: true
-          generate_release_notes: true
           draft: false
           prerelease: false
