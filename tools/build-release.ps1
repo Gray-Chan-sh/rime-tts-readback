@@ -8,7 +8,7 @@
 
     Usage:
         powershell -ExecutionPolicy Bypass -File tools\build-release.ps1
-        powershell -ExecutionPolicy Bypass -File tools\build-release.ps1 -Version 1.0.1
+        powershell -ExecutionPolicy Bypass -File tools\build-release.ps1 -Version 1.1.0
 #>
 param(
     [string]$Version,
