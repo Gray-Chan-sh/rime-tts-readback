@@ -118,6 +118,34 @@ jobs:
           (cd "$RUNNER_TEMP/pkg" && zip -qry "$GITHUB_WORKSPACE/dist/rime-tts-readback-$VERSION-macos.zip" "rime-tts-readback-$VERSION")
           ls -lh dist
 
+      # The .app keeps the watcher and rime.lua beside the menubar binary, so a
+      # plain drag-to-Applications install is enough (no Xcode / install.sh).
+      - name: Package macOS DMG
+        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+        env:
+          VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          set -euo pipefail
+          chmod +x packaging/macos/make-dmg.sh
+          ./packaging/macos/make-dmg.sh "$VERSION" "$RUNNER_TEMP/bin" "$GITHUB_WORKSPACE/dist"
+          ls -lh dist
+
+      - name: Verify macOS DMG
+        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+        env:
+          VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          set -euo pipefail
+          mountpoint="$RUNNER_TEMP/dmg"
+          mkdir -p "$mountpoint"
+          hdiutil attach -nobrowse -readonly -mountpoint "$mountpoint" \
+            "dist/rime-tts-readback-$VERSION.dmg"
+          test -d "$mountpoint/RimeTtsReadback.app"
+          test -x "$mountpoint/RimeTtsReadback.app/Contents/MacOS/rime-tts-menubar"
+          test -f "$mountpoint/RimeTtsReadback.app/Contents/MacOS/rime-tts-watcher"
+          test -f "$mountpoint/RimeTtsReadback.app/Contents/MacOS/rime.lua"
+          hdiutil detach "$mountpoint"
+
       - name: Upload macOS artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -199,6 +227,26 @@ jobs:
           mkdir -p dist
           tar -czf "dist/rime-tts-readback-$VERSION-linux.tar.gz" -C "$RUNNER_TEMP/pkg" "rime-tts-readback-$VERSION"
           ls -lh dist
+
+      # A real single-file AppImage with a bundled CPython + Tk.  The system
+      # still provides the speech engine (spd-say/espeak-ng).
+      - name: Package Linux AppImage
+        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+        env:
+          VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          set -euo pipefail
+          chmod +x packaging/linux/make-appimage.sh
+          ./packaging/linux/make-appimage.sh "$VERSION" "$GITHUB_WORKSPACE/dist"
+          ls -lh dist
+
+      - name: AppImage smoke test
+        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+        env:
+          VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          set -euo pipefail
+          APPIMAGE_EXTRACT_AND_RUN=1 "dist/rime-tts-readback-$VERSION-x86_64.AppImage" version
 
       - name: Upload Linux artifacts
         uses: actions/upload-artifact@v4

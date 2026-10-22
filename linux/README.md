@@ -29,7 +29,7 @@ Linux 端只用 **Python 3 标准库**：朗读器、CLI、Tk 控制面板、可
 
 ## 系统要求
 
-- **Python 3.8+**（Ubuntu 24.04 自带 3.12）。
+- **Python 3.8+**（Ubuntu 24.04 自带 3.12）。Release 的 AppImage 已自带 Python 和 Tk，可跳过这两项。
 - **Tk**（仅控制面板需要）：Debian/Ubuntu `python3-tk`，Fedora `python3-tkinter`。
 - **带 librime-lua 的 Rime 前端**：fcitx5-rime、ibus-rime 或 fcitx4-rime。
 - **TTS**（二选一，优先第一个）：
@@ -48,6 +48,17 @@ sudo apt install python3-tk speech-dispatcher espeak-ng wmctrl xdotool x11-utils
 ```
 
 ## 安装
+
+Release 里的 `rime-tts-readback-<版本>-x86_64.AppImage` 是单文件包：
+
+```sh
+chmod +x rime-tts-readback-*.AppImage
+./rime-tts-readback-*.AppImage          # 打开控制面板
+./rime-tts-readback-*.AppImage --help   # 命令行用法
+```
+
+语音仍使用系统的 `spd-say` / `espeak-ng`；托盘仍需要系统的 GTK3 PyGObject。
+从源码安装：
 
 ```sh
 cd linux

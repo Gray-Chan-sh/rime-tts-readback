@@ -24,6 +24,16 @@ def _python() -> str:
     return sys.executable or "python3"
 
 
+def _reader_command() -> List[str]:
+    # In an AppImage the interpreter and scripts live on a temporary mount.
+    # Starting the AppImage itself keeps that mount alive for the reader's
+    # lifetime (AppRun maps --reader-daemon to the foreground reader).
+    appimage = os.environ.get("APPIMAGE")
+    if appimage:
+        return [appimage, "--reader-daemon", "--quiet"]
+    return [_python(), str(READER), "--quiet"]
+
+
 # ---------------------------------------------------------------- reader
 
 
@@ -37,7 +47,7 @@ def start_reader() -> List[str]:
     c.QUEUE_DIR.mkdir(parents=True, exist_ok=True)
     try:
         subprocess.Popen(
-            [_python(), str(READER), "--quiet"],
+            _reader_command(),
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             start_new_session=True,
@@ -45,7 +55,9 @@ def start_reader() -> List[str]:
         )
     except OSError as exc:
         return [f"启动失败: {exc}"]
-    for _ in range(100):
+    # An AppImage may need a moment to mount/extract before the reader writes
+    # its pid file.
+    for _ in range(250):
         pid = c.reader_pid()
         if pid:
             return [f"已启动后台朗读 (pid {pid})"]
@@ -187,12 +199,21 @@ def reload_rime() -> List[str]:
 # ---------------------------------------------------------------- panel / tray
 
 
-def _spawn(script: Path, args: List[str]) -> Optional[str]:
+def _spawn(
+    script: Path,
+    args: List[str],
+    appimage_args: Optional[List[str]] = None,
+) -> Optional[str]:
     if not script.is_file():
         return f"找不到 {script}"
+    appimage = os.environ.get("APPIMAGE")
+    if appimage and appimage_args is not None:
+        cmd = [appimage] + appimage_args
+    else:
+        cmd = [_python(), str(script)] + args
     try:
         subprocess.Popen(
-            [_python(), str(script)] + args,
+            cmd,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             start_new_session=True,
@@ -213,7 +234,7 @@ def start_panel(show: bool = True) -> List[str]:
             except OSError:
                 pass
         return [f"控制面板已在运行 (pid {pid})"]
-    err = _spawn(PANEL, [])
+    err = _spawn(PANEL, [], [] if show else ["--hidden"])
     if err:
         return [err]
     return ["已启动控制面板"]
@@ -227,7 +248,11 @@ def start_tray(show_panel: bool = False) -> List[str]:
         if show_panel:
             start_panel(show=True)
         return [f"托盘已在运行 (pid {pid})"]
-    err = _spawn(TRAY, ["--panel"] if show_panel else [])
+    err = _spawn(
+        TRAY,
+        ["--panel"] if show_panel else [],
+        ["--tray"] + (["--panel"] if show_panel else []),
+    )
     if err:
         return [err]
     return ["菜单栏/托盘图标已启动"]
@@ -312,8 +337,15 @@ def open_config() -> bool:
 
 
 def set_autostart(enabled: bool) -> bool:
-    entry = HERE / "rime-tts"
-    line = f"{c.desktop_quote(_python())} {c.desktop_quote(str(entry))} start"
+    # Inside an AppImage the mount path does not survive a reboot.  Start the
+    # AppImage itself in the foreground reader mode instead; AppRun keeps the
+    # mount alive while the reader runs.
+    appimage = os.environ.get("APPIMAGE")
+    if appimage:
+        line = f"{c.desktop_quote(appimage)} --reader-daemon"
+    else:
+        entry = HERE / "rime-tts"
+        line = f"{c.desktop_quote(_python())} {c.desktop_quote(str(entry))} start"
     return c.set_autostart(enabled, line)
 
 

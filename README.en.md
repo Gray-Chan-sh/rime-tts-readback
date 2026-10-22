@@ -230,6 +230,21 @@ creates `tts_queue/`. Common flags: `--patch`, `--no-start`, `--tray`, `--panel`
 `--autostart`, `--prefix`. Skip `--patch` if you prefer to click **安装 / 接管** in the panel.
 Details: [linux/README.md](linux/README.md).
 
+### Prebuilt packages (Releases)
+
+Download from [Releases](https://github.com/Gray-Chan-sh/rime-tts-readback/releases):
+
+| Platform | File | How to run |
+|---|---|---|
+| Windows | `RimeTtsReadback-<version>.exe` | Double-click |
+| macOS | `rime-tts-readback-<version>.dmg` | Drag to Applications, open, menu bar icon -> Deploy |
+| Linux | `rime-tts-readback-<version>-x86_64.AppImage` | `chmod +x`, then double-click (or `./...AppImage`) |
+| Fallback | `...-macos.zip` / `...-linux.tar.gz` | Extract and run `./install.sh` |
+
+The macOS build is Apple Silicon (arm64) and not notarized; right-click -> Open the first
+time if Gatekeeper blocks it. The Linux AppImage bundles Python and Tk; audio still uses the
+system `spd-say` or `espeak-ng`. Checksums are in `SHA256SUMS.txt` on the release.
+
 ---
 
 ## Usage

@@ -205,6 +205,21 @@ cd linux
 常用选项：`--patch`、`--no-start`、`--tray`、`--panel`、`--autostart`、`--prefix`。
 不放心自动打补丁就不加 `--patch`，之后在面板里点「安装 / 接管」。详见 [linux/README.md](linux/README.md)。
 
+### 预编译包（Releases）
+
+从 [Releases](https://github.com/Gray-Chan-sh/rime-tts-readback/releases) 直接下载：
+
+| 平台 | 文件 | 用法 |
+|---|---|---|
+| Windows | `RimeTtsReadback-<版本>.exe` | 双击运行 |
+| macOS | `rime-tts-readback-<版本>.dmg` | 拖进「应用程序」，打开后点菜单栏图标 →「部署」 |
+| Linux | `rime-tts-readback-<版本>-x86_64.AppImage` | `chmod +x` 后双击（或 `./...AppImage`） |
+| 备用 | `...-macos.zip` / `...-linux.tar.gz` | 解压后运行 `./install.sh` |
+
+macOS 包是 Apple Silicon（arm64）构建，未公证；首次打开若被拦截，右键 →「打开」。
+Linux AppImage 自带 Python 与 Tk，语音仍使用系统的 `spd-say` 或 `espeak-ng`。
+各文件的校验和见 Release 中的 `SHA256SUMS.txt`。
+
 ---
 
 ## 用法

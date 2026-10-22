@@ -19,7 +19,7 @@ import Foundation
 import AppKit
 import Darwin
 
-let APP_VERSION = "1.0.0"
+let APP_VERSION = "1.1.0"
 let AGENT_LABEL = "com.graychan.rime-tts-readback.menubar"
 
 // ---------------------------------------------------------------- paths

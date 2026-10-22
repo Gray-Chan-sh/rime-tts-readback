@@ -20,11 +20,14 @@ command -v swiftc >/dev/null 2>&1 || {
 
 mkdir -p "$out"
 
+target="$(uname -m)-apple-macosx13.0"
+
 echo "building rime-tts-watcher ..."
-swiftc -O "$here/RimeTtsWatcher.swift" -o "$out/rime-tts-watcher"
+swiftc -O -target "$target" "$here/RimeTtsWatcher.swift" -o "$out/rime-tts-watcher"
 echo "building rime-tts-menubar ..."
-swiftc -O "$here/main.swift" "$here/RimeTtsMenuBar.swift" "$here/RimeTtsModel.swift" \
-  "$here/RimeTtsPanel.swift" -o "$out/rime-tts-menubar" -framework Carbon
+swiftc -O -target "$target" "$here/main.swift" "$here/RimeTtsMenuBar.swift" \
+  "$here/RimeTtsModel.swift" "$here/RimeTtsPanel.swift" \
+  -o "$out/rime-tts-menubar" -framework Carbon
 
 cp "$root/rime/rime.lua" "$out/rime.lua"
 

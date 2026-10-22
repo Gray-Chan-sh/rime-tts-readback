@@ -26,7 +26,7 @@ Windows 版那套「SAPI + WinForms + 注册表」在 macOS 上不存在，所�
 |---|---|
 | macOS | 13 及以上（与 Squirrel 1.x 一致） |
 | 鼠须管 | 带 lua 插件，官方 1.1.x 已内置（`Squirrel.app/Contents/Frameworks/rime-plugins/librime-lua.dylib`） |
-| 构建工具 | Xcode Command Line Tools（`xcode-select --install`），只为编译 Swift |
+| 构建工具 | Xcode Command Line Tools（`xcode-select --install`），只为源码编译 Swift；Release 的 DMG 已带编译好的二进制，无需 Xcode |
 | 语音 | 系统自带 `Tingting`（zh-CN）；`rime-tts voices` 可列出全部 |
 
 Rime 用户目录：`~/Library/Rime`。
@@ -34,6 +34,12 @@ Rime 用户目录：`~/Library/Rime`。
 ---
 
 ## 安装
+
+Release 里的 `rime-tts-readback-<版本>.dmg` 是免编译的：把 `RimeTtsReadback.app`
+拖进「应用程序」，打开后从菜单栏图标进入控制面板，点「部署」即可。首次打开若被
+Gatekeeper 拦截，右键 →「打开」。
+
+从源码安装：
 
 ```sh
 cd macos
