@@ -86,3 +86,48 @@ jobs:
           name: rime-tts-readback-macos
           path: ${{ runner.temp }}/bin/*
           if-no-files-found: error
+
+  linux:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.8'
+
+      # The Linux side is pure standard-library Python, so syntax checks, unit
+      # tests and the CLI/installer smoke tests all run without a display.
+      - name: Syntax check
+        run: |
+          python -m py_compile linux/*.py linux/rime-tts
+          bash -n linux/install.sh
+          bash -n linux/uninstall.sh
+
+      - name: Unit tests
+        working-directory: linux
+        run: python -m unittest discover -s tests -v
+
+      - name: CLI smoke test (no audio)
+        env:
+          RIME_TTS_STATE: ${{ runner.temp }}/state
+          RIME_USER_DIR: ${{ runner.temp }}/rime
+          RIME_TTS_DIR: ${{ runner.temp }}/rime/tts_queue
+        run: |
+          python linux/rime-tts version
+          python linux/rime-tts check
+          python linux/rime_tts_reader.py --check
+
+      - name: Installer smoke test
+        run: |
+          bash ./linux/install.sh --prefix "$RUNNER_TEMP/inst" --rime-dir "$RUNNER_TEMP/rime" --no-start
+          test -x "$RUNNER_TEMP/inst/bin/rime-tts"
+          test -f "$RUNNER_TEMP/rime/rime.lua"
+          test -f "$RUNNER_TEMP/inst/share/rime.lua"
+          test -f "$RUNNER_TEMP/inst/config.json"
+          "$RUNNER_TEMP/inst/bin/rime-tts" status
+          bash ./linux/uninstall.sh --prefix "$RUNNER_TEMP/inst" --rime-dir "$RUNNER_TEMP/rime" --no-reload -y
+          test ! -e "$RUNNER_TEMP/rime/rime.lua"

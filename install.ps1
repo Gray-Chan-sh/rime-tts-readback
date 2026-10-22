@@ -8,10 +8,10 @@
     It does NOT edit your Rime schemas for you: you still have to add
 
         patch:
-          engine/processors/+:
-            - lua_processor@tts_reporter
+          "engine/processors/@before 0": "lua_processor@tts_reporter"
 
-    to each *.custom.yaml you use, then redeploy Rime.
+    to each *.custom.yaml you use, then redeploy Rime. (On Linux use
+    linux/install.sh instead.)
 #>
 param(
     [string]$RimeDir = (Join-Path $env:APPDATA 'Rime'),
@@ -51,8 +51,7 @@ Write-Host ''
 Write-Host 'Next steps:'
 Write-Host "  1) Add to each schema's *.custom.yaml under $RimeDir :"
 Write-Host '         patch:'
-Write-Host '           engine/processors/+:'
-Write-Host '             - lua_processor@tts_reporter'
+Write-Host '           "engine/processors/@before 0": "lua_processor@tts_reporter"'
 Write-Host '  2) Redeploy Rime (tray icon -> Redeploy)'
 
 if (-not $NoStart) {

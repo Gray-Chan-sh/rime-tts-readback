@@ -182,15 +182,39 @@ function Invoke-Redeploy {
 function Add-ReadbackPatch([string]$file) {
     if (-not (Test-Path -LiteralPath $file)) { Set-Content -LiteralPath $file -Value @('patch:') -Encoding UTF8 }
     $lines = @(Get-Content -LiteralPath $file -Encoding UTF8)
-    if (($lines -join "`n") -match 'lua_processor@tts_reporter') { return $false }
+    if (($lines -join "`n") -match '(?m)^\s*"engine/processors/@before 0"\s*:\s*"lua_processor@tts_reporter"') {
+        return $false   # already the current, correct form
+    }
+
+    # Remove our old marker block and any of our processor entries. This also
+    # upgrades the historical "engine/processors/+:" form (which never saw bare
+    # digits/letters because ascii_composer rejects them before the chain).
+    $kept = New-Object System.Collections.Generic.List[string]
+    foreach ($l in $lines) {
+        if ($l -match 'rime-tts-readback') { continue }
+        if ($l -match 'lua_processor@tts_reporter') { continue }
+        $kept.Add($l)
+    }
+
+    # Drop an "engine/processors/+:" whose list is empty after removing our line.
+    $clean = New-Object System.Collections.Generic.List[string]
+    for ($i = 0; $i -lt $kept.Count; $i++) {
+        $l = $kept[$i]
+        if ($l -match '^\s*engine/processors/\+:\s*$') {
+            $j = $i + 1
+            while ($j -lt $kept.Count -and ($kept[$j].Trim() -eq '' -or $kept[$j].Trim().StartsWith('#'))) { $j++ }
+            if ($j -ge $kept.Count -or -not ($kept[$j] -match '^\s*-\s')) { continue }
+        }
+        $clean.Add($l)
+    }
+
     $out = New-Object System.Collections.Generic.List[string]
     $inserted = $false
-    foreach ($l in $lines) {
+    foreach ($l in $clean) {
         $out.Add($l)
         if (-not $inserted -and $l -match '^patch:\s*$') {
             $out.Add('  # >>> rime-tts-readback >>>')
-            $out.Add('  engine/processors/+:')
-            $out.Add('    - lua_processor@tts_reporter')
+            $out.Add('  "engine/processors/@before 0": "lua_processor@tts_reporter"')
             $out.Add('  # <<< rime-tts-readback <<<')
             $inserted = $true
         }
@@ -199,8 +223,7 @@ function Add-ReadbackPatch([string]$file) {
         $out.Add('')
         $out.Add('patch:')
         $out.Add('  # >>> rime-tts-readback >>>')
-        $out.Add('  engine/processors/+:')
-        $out.Add('    - lua_processor@tts_reporter')
+        $out.Add('  "engine/processors/@before 0": "lua_processor@tts_reporter"')
         $out.Add('  # <<< rime-tts-readback <<<')
     }
     Set-Content -LiteralPath $file -Value $out -Encoding UTF8
@@ -239,7 +262,12 @@ function Read-Config {
     return $null
 }
 function Write-Config($obj) {
-    $json = $obj | ConvertTo-Json -Depth 5
+    # Keep the legacy master switch pointing at "both on" so an older reader
+    # (which only knows IncludeAscii) still reads digits and letters.
+    $jsonObj = [ordered]@{}
+    foreach ($p in $obj.PSObject.Properties) { $jsonObj[$p.Name] = $p.Value }
+    $jsonObj['IncludeAscii'] = ([bool]$obj.ReadDigits -and [bool]$obj.ReadEnglish)
+    $json = $jsonObj | ConvertTo-Json -Depth 5
     [System.IO.File]::WriteAllText($script:ConfigFile, $json, (New-Object System.Text.UTF8Encoding($true)))
 }
 
@@ -321,6 +349,18 @@ function Disable-Readback {
     Stop-Watcher
     $msgs.Add('已停止后台朗读')
     return $msgs
+}
+
+function Clear-Queue {
+    $n = 0
+    if (Test-Path -LiteralPath $script:QueueDir) {
+        Get-ChildItem -LiteralPath $script:QueueDir -File -ErrorAction SilentlyContinue |
+            Where-Object { $_.Extension -in '.txt', '.tmp' } |
+            ForEach-Object {
+                try { Remove-Item -LiteralPath $_.FullName -Force -ErrorAction Stop; $n++ } catch { }
+            }
+    }
+    return "已清空队列（$n 个文件）"
 }
 
 # ---------------------------------------------------------------- autostart
@@ -577,6 +617,18 @@ $btnRefresh.SetBounds(640, 118, 104, 26)
 $gbStatus.Controls.Add($btnRefresh)
 $tip.SetToolTip($btnRefresh, '重新检测：Rime 安装、方案补丁、是否已部署、后台进程与静音状态。')
 
+$btnOpenDir = New-Object System.Windows.Forms.Button
+$btnOpenDir.Text = '打开 Rime 目录'
+$btnOpenDir.SetBounds(416, 118, 104, 26)
+$gbStatus.Controls.Add($btnOpenDir)
+$tip.SetToolTip($btnOpenDir, '在资源管理器中打开 Rime 用户目录（rime.lua 与方案补丁所在处）。')
+
+$btnClearQueue = New-Object System.Windows.Forms.Button
+$btnClearQueue.Text = '清空队列'
+$btnClearQueue.SetBounds(528, 118, 104, 26)
+$gbStatus.Controls.Add($btnClearQueue)
+$tip.SetToolTip($btnClearQueue, '删除队列里尚未朗读的上屏文本（*.txt / 半截 *.tmp），不会改动 Rime 配置。')
+
 # ---- actions group
 $gbOps = New-Object System.Windows.Forms.GroupBox
 $gbOps.Text = '操作'
@@ -673,12 +725,19 @@ $chkCharByChar.Checked = $false
 $gbParams.Controls.Add($chkCharByChar)
 $tip.SetToolTip($chkCharByChar, '勾选=逐字读出（字与字之间用逗号停顿，约 0.4 秒/字，便于核对，但明显更慢）；取消（默认）=整句连续朗读。')
 
-$chkAscii = New-Object System.Windows.Forms.CheckBox
-$chkAscii.Text = '朗读英文与数字 (IncludeAscii)'
-$chkAscii.SetBounds(16, 326, 300, 22)
-$chkAscii.Checked = $true
-$gbParams.Controls.Add($chkAscii)
-$tip.SetToolTip($chkAscii, '勾选后英文与数字也会朗读。注意：只有经输入法上屏的内容才会被读到，直接输入(未上屏)的内容不会。')
+$chkDigits = New-Object System.Windows.Forms.CheckBox
+$chkDigits.Text = '朗读数字'
+$chkDigits.SetBounds(16, 326, 150, 22)
+$chkDigits.Checked = $true
+$gbParams.Controls.Add($chkDigits)
+$tip.SetToolTip($chkDigits, '是否朗读数字（逐个读：12 → 一、二）。关闭后数字仍正常上屏，只是不朗读。')
+
+$chkEnglish = New-Object System.Windows.Forms.CheckBox
+$chkEnglish.Text = '朗读英文'
+$chkEnglish.SetBounds(176, 326, 160, 22)
+$chkEnglish.Checked = $true
+$gbParams.Controls.Add($chkEnglish)
+$tip.SetToolTip($chkEnglish, '是否朗读 ASCII 字母（逐个读：abc → a b c；鼠须管英文模式下直接敲的字母也会读）。关闭后英文仍正常上屏，只是不朗读。')
 
 $chkAuto = New-Object System.Windows.Forms.CheckBox
 $chkAuto.Text = '开机自动启动（托盘）'
@@ -892,7 +951,8 @@ function Collect-Config {
         PadMs         = [int]$numPad.Value
         Volume        = [int]$numVolume.Value
         CharByChar    = [bool]$chkCharByChar.Checked
-        IncludeAscii  = [bool]$chkAscii.Checked
+        ReadDigits    = [bool]$chkDigits.Checked
+        ReadEnglish   = [bool]$chkEnglish.Checked
         AppFilterMode = (Get-FilterMode)
         AppFilterList = @(Get-FilterList)
         HotKey        = [string]$txtHot.Text
@@ -917,7 +977,11 @@ function Load-ConfigIntoUi {
         if ($null -ne $cfg.PadMs)      { $numPad.Value     = [int]$cfg.PadMs }
         if ($null -ne $cfg.Volume)     { $numVolume.Value  = [int]$cfg.Volume }
         if ($null -ne $cfg.CharByChar) { $chkCharByChar.Checked = [bool]$cfg.CharByChar }
-        if ($null -ne $cfg.IncludeAscii) { $chkAscii.Checked = [bool]$cfg.IncludeAscii }
+        # New keys win; an old config only has IncludeAscii, which meant "letters and digits".
+        if ($null -ne $cfg.ReadDigits)       { $chkDigits.Checked = [bool]$cfg.ReadDigits }
+        elseif ($null -ne $cfg.IncludeAscii) { $chkDigits.Checked = [bool]$cfg.IncludeAscii }
+        if ($null -ne $cfg.ReadEnglish)      { $chkEnglish.Checked = [bool]$cfg.ReadEnglish }
+        elseif ($null -ne $cfg.IncludeAscii) { $chkEnglish.Checked = [bool]$cfg.IncludeAscii }
         if ($cfg.AppFilterMode)        { Set-FilterMode ([string]$cfg.AppFilterMode) }
         if ($cfg.AppFilterList)        { $txtFilterList.Text = (@($cfg.AppFilterList) -join ', ') }
         if ($cfg.HotKey)               { $txtHot.Text = [string]$cfg.HotKey }
@@ -968,7 +1032,8 @@ function Snapshot-Controls {
         PadMs         = [int]$numPad.Value
         Volume        = [int]$numVolume.Value
         CharByChar    = [bool]$chkCharByChar.Checked
-        IncludeAscii  = [bool]$chkAscii.Checked
+        ReadDigits    = [bool]$chkDigits.Checked
+        ReadEnglish   = [bool]$chkEnglish.Checked
         AutoStart     = [bool]$chkAuto.Checked
         Watchdog      = [bool]$chkWatch.Checked
         HotKeyEnabled = [bool]$chkHot.Checked
@@ -978,7 +1043,8 @@ function Snapshot-Controls {
 }
 $script:ParamNames = @{
     Voice = '语音'; Rate = '语速'; IdleMs = '触发间隔'; MaxWaitMs = '最长等待'
-    Threshold = '静音阈值'; PadMs = '边距'; Volume = '音量'; CharByChar = '逐字朗读'; IncludeAscii = '朗读英文数字'
+    Threshold = '静音阈值'; PadMs = '边距'; Volume = '音量'; CharByChar = '逐字朗读'
+    ReadDigits = '朗读数字'; ReadEnglish = '朗读英文'
     AppFilterMode = '筛选模式'; AppFilterList = '筛选列表'; HotKey = '快捷键'; HotKeyEnabled = '启用快捷键'
     AutoStart = '开机自启'; Watchdog = '看门狗'
 }
@@ -991,7 +1057,7 @@ function Get-ConfigDiff($old, $new) {
         if ($p.Name -eq 'AppFilterList') {
             $os = (@($ov) -join ', '); $ns = (@($nv) -join ', ')
             if ($os -ne $ns) { $diffs.Add("$n : [$os] → [$ns]") }
-        } elseif ($p.Name -in @('CharByChar', 'IncludeAscii', 'AutoStart', 'Watchdog', 'HotKeyEnabled')) {
+        } elseif ($p.Name -in @('CharByChar', 'ReadDigits', 'ReadEnglish', 'AutoStart', 'Watchdog', 'HotKeyEnabled')) {
             $ob = if ($ov) { '开' } else { '关' }; $nb = if ($nv) { '开' } else { '关' }
             if ($ob -ne $nb) { $diffs.Add("$n : $ob → $nb") }
         } else {
@@ -1049,6 +1115,7 @@ $miShow    = $menu.Items.Add('显示窗口')
 $miEnable  = $menu.Items.Add('启用回读')
 $miDisable = $menu.Items.Add('禁用回读')
 [void]$menu.Items.Add('-')
+$miClear   = $menu.Items.Add('清空队列')
 $miExit    = $menu.Items.Add('退出')
 $notify.ContextMenuStrip = $menu
 
@@ -1346,6 +1413,7 @@ $notify.Add_MouseDoubleClick({ Show-Main })
 $miShow.Add_Click({ Show-Main })
 $miEnable.Add_Click({ Run-Action '启用回读（通知栏）' { Enable-Readback } })
 $miDisable.Add_Click({ Run-Action '禁用回读（通知栏）' { Disable-Readback } })
+$miClear.Add_Click({ Run-Action '清空队列（通知栏）' { , (Clear-Queue) } })
 $miExit.Add_Click({
     $script:ReallyExit = $true
     $timer.Stop()
@@ -1370,6 +1438,8 @@ $timer.Start()
 
 # style the remaining buttons
 Set-BtnStyle $btnRefresh
+Set-BtnStyle $btnOpenDir
+Set-BtnStyle $btnClearQueue
 Set-BtnStyle $btnTest
 Set-BtnStyle $btnSave
 Set-BtnStyle $btnApply -Primary
@@ -1385,7 +1455,8 @@ $numPad.Add_ValueChanged({ Track-Change 'PadMs' '边距' ([int]$numPad.Value) })
 $numVolume.Add_ValueChanged({ Track-Change 'Volume' '音量' ([int]$numVolume.Value) })
 $cbVoice.Add_SelectedIndexChanged({ Track-Change 'Voice' '语音' ([string]$cbVoice.SelectedItem) })
 $chkCharByChar.Add_CheckedChanged({ Track-Change 'CharByChar' '逐字朗读' ([bool]$chkCharByChar.Checked) })
-$chkAscii.Add_CheckedChanged({ Track-Change 'IncludeAscii' '朗读英文数字' ([bool]$chkAscii.Checked) })
+$chkDigits.Add_CheckedChanged({ Track-Change 'ReadDigits' '朗读数字' ([bool]$chkDigits.Checked) })
+$chkEnglish.Add_CheckedChanged({ Track-Change 'ReadEnglish' '朗读英文' ([bool]$chkEnglish.Checked) })
 $chkAuto.Add_CheckedChanged({ Track-Change 'AutoStart' '开机自启' ([bool]$chkAuto.Checked) })
 $chkWatch.Add_CheckedChanged({ Track-Change 'Watchdog' '看门狗' ([bool]$chkWatch.Checked) })
 $chkHot.Add_CheckedChanged({ Track-Change 'HotKeyEnabled' '启用快捷键' ([bool]$chkHot.Checked) })
@@ -1394,6 +1465,13 @@ $txtFilterList.Add_Leave({ Track-Change 'AppFilterList' '筛选列表' (@(Get-Fi
 
 # ---------------------------------------------------------------- wiring
 $btnRefresh.Add_Click({ Refresh-View; Log-Line '已刷新检测' })
+$btnOpenDir.Add_Click({
+    try {
+        if (Test-Path -LiteralPath $script:RimeUserDir) { Start-Process explorer.exe $script:RimeUserDir }
+        else { Log-Line "Rime 用户目录不存在: $script:RimeUserDir" }
+    } catch { Log-Line "打开目录失败: $($_.Exception.Message)" }
+})
+$btnClearQueue.Add_Click({ Run-Action '清空队列' { , (Clear-Queue) } })
 $btnInstall.Add_Click({ Run-Action '部署到 Rime' { Install-Readback } })
 $btnHelp.Add_Click({
     Run-Action '一键安装' {

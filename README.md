@@ -11,7 +11,9 @@
 `Microsoft Huihui Desktop`。
 
 macOS 上用**鼠须管 Squirrel** + 系统语音（`Tingting`），见 [macos/README.md](macos/README.md)。
-两边共用同一个 Lua 上报层，只有「朗读器」按平台各写一份。
+Linux 上支持 **fcitx5-rime / ibus-rime / fcitx4-rime**，用 speech-dispatcher 或 espeak-ng 朗读，
+见 [linux/README.md](linux/README.md)。三端共用同一个 Lua 上报层与同一份 `config.json` 语义，
+只有「朗读器」和「控制面板」按平台各写一份。
 
 ## 平台支持
 
@@ -19,7 +21,7 @@ macOS 上用**鼠须管 Squirrel** + 系统语音（`Tingting`），见 [macos/R
 |---|---|---|
 | Windows 10/11（小狼毫 Weasel） | ✅ 已实现并验证 | 本文档 |
 | macOS 13+（鼠须管 Squirrel） | ✅ 已实现并验证 | [macos/README.md](macos/README.md) |
-| Linux（ibus-rime / fcitx5-rime） | 🚧 未实现 | 仅 `rime.lua` 可复用，见 [DEVELOPING.md](DEVELOPING.md) |
+| Linux（fcitx5-rime / ibus-rime / fcitx4-rime） | ✅ 已实现（WSL Ubuntu 验证；托盘/快捷键需 X11） | [linux/README.md](linux/README.md) |
 
 跨平台架构、队列协议、配置键和**平台对齐清单**见 [DEVELOPING.md](DEVELOPING.md)。
 
@@ -96,8 +98,8 @@ Windows SAPI 的"默认音频输出"看起来慢，其实不然：
   - 快速自检：安装目录的 `rime.dll` 里含 `lua_processor` 字样。
 - 其它前端：`rime/rime.lua` 已经是跨平台的（自动使用 `HOME` 与正确的路径分隔符）。
   - **鼠须管 Squirrel**：朗读器 + 控制面板见 [macos/README.md](macos/README.md)。
-  - **ibus-rime / fcitx5-rime**：目前只有 Lua 层可复用，路径探测和朗读器还没做；
-    见 [DEVELOPING.md](DEVELOPING.md) 的 Linux 清单。
+  - **ibus-rime / fcitx5-rime / fcitx4-rime**：自动探测 Rime 用户目录（也可用 `RIME_USER_DIR`
+    指定），朗读器、控制面板、托盘与全局快捷键见 [linux/README.md](linux/README.md)。
 
 ### 语音
 
@@ -127,6 +129,24 @@ powershell -STA -File RimeTtsReadback.Gui.ps1 -Check
 - **Xcode Command Line Tools**（`xcode-select --install`）——只在构建时用来跑 `swiftc`，日常运行不需要 Xcode。
 - 语音用系统自带的 `Tingting`（zh-CN），`rime-tts voices` 可列出全部可用语音。
 - 自检：`rime-tts check`。完整说明见 [macos/README.md](macos/README.md)。
+
+### Linux
+
+- **Python 3.8+**（只用标准库）；控制面板需要 Tk（Debian/Ubuntu 的 `python3-tk`，
+  Fedora 的 `python3-tkinter`）。
+- **带 librime-lua 的前端**：fcitx5-rime、ibus-rime 或 fcitx4-rime。
+- **TTS**：优先 `speech-dispatcher`（`spd-say`，桌面集成最好），否则回退 `espeak-ng` / `espeak`。
+  Debian/Ubuntu：
+
+  ```sh
+  sudo apt install speech-dispatcher espeak-ng python3-tk
+  ```
+
+- **可选**：`wmctrl`（面板里列举运行中的程序）、`notify-send`（托盘操作气泡）、
+  `xdotool` 或 `xprop`（程序筛选与前台窗口判断）。
+- **X11**：托盘（GTK3 `StatusIcon`）与全局快捷键需要 X11。Wayland 下会降级：
+  托盘可能不显示、快捷键跳过、程序筛选不生效（照常朗读），其余功能不受影响。
+- 自检：`rime-tts check`。完整说明见 [linux/README.md](linux/README.md)。
 
 ---
 
@@ -173,6 +193,18 @@ rime-tts reload                  # 或菜单栏「ㄓ」→ 重新部署
 `~/Library/Rime/`，并建好 `~/Library/Rime/tts_queue/`。不想用 `--patch` 的话，控制面板里的
 「部署到 Rime」按钮做同样的事。详见 [macos/README.md](macos/README.md)。
 
+### Linux
+
+```sh
+cd linux
+./install.sh --patch --tray    # 安装 + 打补丁 + 启动后台 + 托盘图标
+```
+
+`install.sh` 会装到 `~/.rime-tts-readback/`，自动探测 fcitx5-rime / ibus-rime / fcitx4-rime 的
+用户目录（也可 `--rime-dir` 或 `RIME_USER_DIR` 指定），把 `rime.lua` 放进去并建好 `tts_queue/`。
+常用选项：`--patch`、`--no-start`、`--tray`、`--panel`、`--autostart`、`--prefix`。
+不放心自动打补丁就不加 `--patch`，之后在面板里点「安装 / 接管」。详见 [linux/README.md](linux/README.md)。
+
 ---
 
 ## 用法
@@ -185,6 +217,8 @@ rime-tts reload                  # 或菜单栏「ㄓ」→ 重新部署
 | 彻底移除 | `Rime_tts_stop.bat`，删除 `%APPDATA%\Rime\rime.lua`，去掉 `lua_processor@tts_reporter` 那几行，再重新部署 |
 
 macOS 上对应的是 `rime-tts off/on/stop/start`、菜单栏图标里的「开机自启」和 `uninstall.sh`。
+Linux 上同样是 `rime-tts off/on/stop/start`，另加 `panel`（控制面板）、`tray`（托盘）、
+`autostart on/off` 与 `shutdown`（一次停掉托盘/面板/朗读器）。
 
 ## 卸载
 
@@ -204,7 +238,7 @@ powershell -ExecutionPolicy Bypass -File uninstall.ps1
 - **启用 / 禁用**（同一个按钮）——静音 / 取消静音；禁用时还会停止后台，并让 `rime.lua` 停止写入（通过 `Rime_tts_off` 标志），不会堆积。
 - **删除回读功能**——从 Rime 移除补丁与 `rime.lua`，并重新部署。
 - **仅重新部署**——只跑一次 Rime 重新部署。
-- **参数**——语音（从已装 SAPI 语音中选择，带试听）、`Rate`、`BreakMs`、`IdleMs`、`MaxWaitMs`、`Threshold`、`PadMs`、`Volume`、`CharByChar`、`IncludeAscii`，保存到 `%USERPROFILE%\Rime_tts_config.json`；后台会**热加载**（约 1 秒内生效，无需重启）。
+- **参数**——语音（从已装 SAPI 语音中选择，带试听）、`Rate`、`BreakMs`、`IdleMs`、`MaxWaitMs`、`Threshold`、`PadMs`、`Volume`、`CharByChar`、`ReadDigits`、`ReadEnglish`，保存到 `%USERPROFILE%\Rime_tts_config.json`；后台会**热加载**（约 1 秒内生效，无需重启）。
 - **托盘图标**——通知栏的彩色圆点表示回读是否可用（绿=可用，橙=未就绪，灰=已禁用/未安装）。最小化或关闭窗口会缩到托盘；单击图标恢复，右键菜单为 显示窗口 / 启用 / 禁用 / 退出。（Win11 上新图标可能先在"隐藏的图标"里，可在 设置 → 个性化 → 任务栏 → 其他系统托盘图标 里固定。）
 - **全局快捷键**——`Ctrl+Alt+R` 在任意程序里切换启用/禁用。设置时会弹出**按键捕获对话框**：直接按组合键即可，并实时报告是否被占用。
 - **气泡提示**——每个标签、按钮、输入项都有气泡说明。
@@ -236,6 +270,23 @@ macOS 版有一个功能对应的原生面板：`rime-tts panel`，或点菜单�
 （`main.swift` + `RimeTtsMenuBar.swift` + `RimeTtsPanel.swift` + `RimeTtsModel.swift` 编译而成）。
 macOS 不需要 Windows 那套 WAV 裁剪参数，所以面板里没有 `Threshold` / `PadMs` / `BreakMs`。
 
+### Linux 控制面板与托盘
+
+`rime-tts panel` 打开 Tk 控制面板，`rime-tts tray` 启动 GTK3 托盘（两者都只是
+`rime-tts` 的子命令，装好后也可以从应用菜单「Rime 回读」打开）：
+
+- 状态检测、安装 / 接管、重新部署、静音、启动/停止后台、移除集成、清空队列、打开 Rime 目录；
+- 语音下拉 + 试听、语速、音量、合并窗口、最长等待、逐字朗读、朗读数字、朗读英文；
+- 程序筛选：全部 / 仅这些 / 除这些，可一键加入当前运行中的窗口类（需要 X11 + `wmctrl`）；
+- 登录自启，以及 X11 全局静音快捷键（默认 `ctrl+alt+r`）；
+- 打开日志 / 配置、检查报告、关于；
+- 改参数即写 `config.json`，朗读器约 1 秒内热加载。
+
+托盘菜单包含打开面板、静音、后台开关、试听、重新部署、清空队列、打开日志/配置、关于与退出。
+GNOME 3.26+ 默认不显示传统托盘图标；此时仍可用面板，或安装 AppIndicator 扩展。
+Wayland 下 `Gtk.StatusIcon`、`XGrabKey` 与窗口类枚举都不可用，会分别降级（不崩溃）：
+面板照常工作，静音可用 `rime-tts on/off` 或 `tts_off` 标志。
+
 ## 配置
 
 可以直接改 `windows\Rime_tts_watcher.ps1` 顶部的参数，然后重启朗读器。
@@ -250,17 +301,26 @@ macOS 不需要 Windows 那套 WAV 裁剪参数，所以面板里没有 `Thresho
 | `-Threshold` / `-PadMs` | `180` / `15` | 静音判定阈值与保留边距 |
 | `-Volume` | `100` | 音量 0..200（只影响本程序）。后台会先把语音峰值归一化到 90%，所以 100 就比原始 SAPI 响约 2.4 倍；>100 会削波 |
 | `-CharByChar` | `false` | `true` = 逐字（字间用逗号停顿，约 0.4 秒/字，更慢但便于核对）；`false` = 整句连读 |
-| `-IncludeAscii` | `true` | 是否也朗读 ASCII 字母/数字 |
+| `-ReadDigits` | `true` | 朗读 ASCII 数字（逐位）；关闭后只跳过数字 |
+| `-ReadEnglish` | `true` | 朗读 ASCII 字母（逐字母）；关闭后只跳过字母 |
+| `-IncludeAscii` | `true` | 旧版总开关；未显式给出 `-ReadDigits` / `-ReadEnglish` 时作为它们的默认值 |
 | `-AppFilterMode` / `-AppFilterList` | `all` / 空 | 程序筛选：`all` / `only` / `except` |
 
-日志位于 `%USERPROFILE%\Rime_tts_watcher.log`（超过 1 MB 自动轮转）。
+macOS 与 Linux 读同一个 `config.json`（键名相同：`Voice`、`Rate`、`IdleMs`、`MaxWaitMs`、
+`Volume`、`CharByChar`、`ReadDigits`、`ReadEnglish`、`AppFilterMode`、`AppFilterList`、`HotKey`），
+路径都是 `~/.rime-tts-readback/config.json`。
+写入时仍会附带兼容键 `IncludeAscii = ReadDigits && ReadEnglish`，旧版朗读器也能继续工作；
+读取旧配置时若没有 `ReadDigits` / `ReadEnglish`，则回退到 `IncludeAscii`。
+
+日志位于 `%USERPROFILE%\Rime_tts_watcher.log`（超过 1 MB 自动轮转）；macOS 与 Linux 都是
+`~/.rime-tts-readback/watcher.log`。
 
 ## 目录结构
 
 ```
 rime-tts-readback/
 ├─ rime/
-│  ├─ rime.lua                          # commit_notifier -> 队列文件（Windows 与 macOS 通用）
+│  ├─ rime.lua                          # commit_notifier -> 队列文件（三端通用）
 │  ├─ wubi86.custom.yaml.example        # 方案补丁示例
 │  └─ wubi_pinyin.custom.yaml.example
 ├─ windows/                             # Windows 实现
@@ -279,16 +339,31 @@ rime-tts-readback/
 │  ├─ rime-tts                          # 命令行
 │  ├─ build.sh / install.sh / uninstall.sh
 │  └─ README.md
+├─ linux/                               # Linux 实现（fcitx5-rime / ibus-rime / fcitx4-rime）
+│  ├─ rime_tts_common.py                # 路径探测、配置、队列、补丁、自启动
+│  ├─ rime_tts_text.py                  # 文本过滤 / 逐位逐字母
+│  ├─ rime_tts_tts.py                   # speech-dispatcher / espeak-ng
+│  ├─ rime_tts_reader.py                # 常驻朗读器
+│  ├─ rime_tts_panel.py                 # Tk 控制面板
+│  ├─ rime_tts_tray.py                  # GTK3 托盘（可选）
+│  ├─ rime_tts_hotkey.py                # X11 全局快捷键
+│  ├─ rime_tts_control.py               # CLI / 面板 / 托盘共享动作
+│  ├─ rime-tts                          # 命令行入口
+│  ├─ install.sh / uninstall.sh
+│  ├─ tests/                            # unittest（配置、补丁、文本、队列）
+│  └─ README.md
 ├─ icons/
 │  ├─ rime-tts-readback.ico             # 应用图标（声波 + 键盘）
+│  ├─ rime-tts-readback.png             # Linux 面板 / 应用菜单
 │  ├─ tray-ok.ico / tray-warn.ico / tray-off.ico
+│  └─ tray-ok.png / tray-warn.png / tray-off.png
 ├─ tools/
 │  ├─ make-icons.ps1                    # 重新生成 icons/（GDI+，多尺寸 DIB）
 │  ├─ build-release.ps1                 # 便携 zip  -> dist/rime-tts-readback-<v>.zip
 │  └─ build-exe.ps1                     # 单文件 exe -> dist/RimeTtsReadback-<v>.exe
-├─ .github/workflows/build.yml          # CI：构建 Windows zip/exe，并编译检查 macOS 二进制
+├─ .github/workflows/build.yml          # CI：构建 Windows zip/exe，编译 macOS，测试 Linux
 ├─ install.ps1 / uninstall.ps1
-├─ DEVELOPING.md                        # 跨平台架构、队列协议、Windows/Linux 待办
+├─ DEVELOPING.md                        # 跨平台架构、队列协议、平台对齐清单
 └─ README.md / README.en.md
 ```
 
@@ -304,6 +379,13 @@ rime-tts-readback/
 - macOS 的 `say(1)` 每次调用有约 0.8–1.4 秒的启动开销（实测），所以朗读器用的是常驻的
   `AVSpeechSynthesizer`；朗读器若被手动杀掉，用 `rime-tts start` 重启（菜单栏图标也会自动看护）。
 - macOS 的两个二进制是本地编译、**未签名**的。自己用没问题，分发给别人需要签名 + 公证。
+- Linux 的托盘依赖 GTK3 `Gtk.StatusIcon`（传统托盘）。GNOME 3.26+ 默认不显示它；
+  可安装 AppIndicator 扩展，或直接用 `rime-tts panel`。
+- Linux 的全局快捷键与程序筛选依赖 **X11**。Wayland 下快捷键会被跳过、前台程序无法识别
+  （此时不做筛选，照常朗读）；静音仍可用 `rime-tts on/off`、面板或 `tts_off` 标志。
+- Linux 的朗读走 `spd-say` 或 `espeak-ng`，音色/语速由所装引擎决定，与 SAPI / `AVSpeechSynthesizer`
+  的数值**不能直接对照**；先用面板「试听」调整。
+- `pip`/虚拟环境同样可用，但安装脚本只依赖系统 `python3`；没有 Tk 时面板不可用，CLI 与朗读器不受影响。
 
 ## 构建与发布
 
@@ -319,8 +401,9 @@ powershell -ExecutionPolicy Bypass -File tools\build-exe.ps1       # dist\RimeTt
 - macOS 侧：`macos/build.sh` 用 `swiftc` 编译两个二进制（需要 Xcode Command Line Tools）；
   macOS 的二进制不签名，随源码分发、由用户本地编译。
 
-CI：`.github/workflows/build.yml` 在每次推送到 `main` 时构建 Windows 的 zip + exe，并在 `macos-14`
-上编译检查 macOS 二进制；对 `v*` 标签，还会把产物挂到对应的 GitHub Release。
+CI：`.github/workflows/build.yml` 在每次推送到 `main` 时构建 Windows 的 zip + exe，在 `macos-14`
+上编译检查 macOS 二进制，并在 `ubuntu-latest` 上做 Linux 的 `py_compile`、单元测试、CLI 与
+安装/卸载冒烟测试；对 `v*` 标签，还会把 Windows 产物挂到对应的 GitHub Release。
 
 ## 许可证
 

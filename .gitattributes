@@ -8,4 +8,6 @@
 *.yml text eol=lf
 *.sh text eol=lf
 *.swift text eol=lf
+*.py text eol=lf
 macos/rime-tts text eol=lf
+linux/rime-tts text eol=lf

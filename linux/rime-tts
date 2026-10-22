@@ -1,0 +1,179 @@
+#!/usr/bin/env python3
+"""rime-tts - command line control for rime-tts-readback on Linux.
+
+  rime-tts start | stop | restart      background reader
+  rime-tts on | off | toggle           mute flag
+  rime-tts status                      one-line state report
+  rime-tts check                       full detection report
+  rime-tts voices                      list installed speech voices
+  rime-tts preview [text]              speak a sample with the current settings
+  rime-tts log [-f]                    open (or follow) the log
+  rime-tts config                      open the config file
+  rime-tts panel                       open the control panel
+  rime-tts tray                        start the tray icon (and the reader)
+  rime-tts patch | unpatch             add/remove the schema patch
+  rime-tts deploy | remove             full deploy / removal
+  rime-tts reload                      ask fcitx5 / ibus to redeploy Rime
+  rime-tts clear-queue                 drop pending commits
+  rime-tts autostart on|off|status     desktop login autostart
+
+Layout (override with RIME_TTS_STATE / RIME_USER_DIR / RIME_TTS_DIR):
+  state  ~/.rime-tts-readback        scripts, config, log, pid
+  Rime   <front-end dir>             rime.lua, tts_queue, tts_off
+"""
+
+from __future__ import annotations
+
+import os
+import sys
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+if str(HERE) not in sys.path:
+    sys.path.insert(0, str(HERE))
+
+import rime_tts_common as c
+import rime_tts_control as ctl
+import rime_tts_tts as tts
+
+
+def say(*lines) -> None:
+    for line in lines:
+        print(line)
+
+
+def die(message: str) -> int:
+    sys.stderr.write(message + "\n")
+    return 1
+
+
+def cmd_status() -> int:
+    say(*ctl.status_lines())
+    return 0
+
+
+def cmd_check() -> int:
+    say(*ctl.check_lines())
+    return 0
+
+
+def cmd_voices() -> int:
+    voices = tts.list_voices()
+    if not voices:
+        say("没有可用语音。请安装 speech-dispatcher 或 espeak-ng。")
+        return 1
+    for v in voices:
+        say(f"{v['language']:<10} {v['name']:<28} {v['display']}")
+    return 0
+
+
+def cmd_log(rest) -> int:
+    if rest and rest[0] in ("-f", "--follow"):
+        if not c.LOG_FILE.exists():
+            c.LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+            c.LOG_FILE.touch()
+        os.execvp("tail", ["tail", "-f", str(c.LOG_FILE)])
+    if not ctl.open_log():
+        say(f"日志: {c.LOG_FILE}")
+        return 1
+    return 0
+
+
+def cmd_config() -> int:
+    if not ctl.open_config():
+        say(f"配置: {c.CONFIG_FILE}")
+        return 1
+    return 0
+
+
+def cmd_remove(rest) -> int:
+    force = any(x in ("-f", "--force", "-y", "--yes") for x in rest)
+    if not force:
+        try:
+            answer = input("将移除 Rime 中的回读集成（补丁、rime.lua）并重新部署。继续？[y/N] ")
+        except EOFError:
+            answer = ""
+        if answer.strip().lower() not in ("y", "yes"):
+            say("已取消")
+            return 0
+    say(*ctl.remove())
+    return 0
+
+
+def cmd_autostart(rest) -> int:
+    action = rest[0] if rest else "status"
+    if action == "on":
+        ok = ctl.set_autostart(True)
+        say("已设置登录自启" if ok else "设置登录自启失败")
+        return 0 if ok else 1
+    if action == "off":
+        ok = ctl.set_autostart(False)
+        say("已取消登录自启" if ok else "取消登录自启失败")
+        return 0 if ok else 1
+    say("登录自启: " + ("是" if c.autostart_enabled() else "否"))
+    return 0
+
+
+def main(argv) -> int:
+    cmd = argv[1] if len(argv) > 1 else "status"
+    rest = argv[2:]
+
+    if cmd in ("-h", "--help", "help"):
+        print(__doc__.strip())
+        return 0
+    if cmd in ("-V", "--version", "version"):
+        say(c.APP_VERSION)
+        return 0
+
+    if cmd == "start":
+        say(*ctl.start_reader())
+    elif cmd == "stop":
+        say(*ctl.stop_reader())
+    elif cmd == "restart":
+        say(*ctl.restart_reader())
+    elif cmd == "on":
+        say(*ctl.enable())
+    elif cmd == "off":
+        say(*ctl.disable())
+    elif cmd == "toggle":
+        say(*ctl.toggle())
+    elif cmd == "status":
+        return cmd_status()
+    elif cmd == "check":
+        return cmd_check()
+    elif cmd == "voices":
+        return cmd_voices()
+    elif cmd == "preview":
+        text = " ".join(rest).strip() or "测试 Rime 回读"
+        say(*ctl.preview(text))
+    elif cmd == "log":
+        return cmd_log(rest)
+    elif cmd == "config":
+        return cmd_config()
+    elif cmd == "panel":
+        say(*ctl.start_panel(show=True))
+    elif cmd == "tray":
+        say(*ctl.start_tray(show_panel=False))
+    elif cmd == "shutdown":
+        say(*ctl.shutdown())
+    elif cmd == "patch":
+        say(*ctl.patch_all())
+    elif cmd == "unpatch":
+        say(*ctl.unpatch_all())
+    elif cmd == "deploy":
+        say(*ctl.deploy())
+    elif cmd == "remove":
+        return cmd_remove(rest)
+    elif cmd == "reload":
+        say(*ctl.reload_rime())
+    elif cmd in ("clear-queue", "clear"):
+        say(f"已清空队列（{c.clear_queue()} 个文件）")
+    elif cmd == "autostart":
+        return cmd_autostart(rest)
+    else:
+        return die(f"unknown command: {cmd} (try: rime-tts help)")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

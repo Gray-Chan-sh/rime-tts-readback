@@ -26,13 +26,67 @@ end
 -- Where the queue and the mute flag live.
 --   Windows : %USERPROFILE%\Rime_tts_queue   / %USERPROFILE%\Rime_tts_off
 --   macOS   : ~/Library/Rime/tts_queue       / ~/Library/Rime/tts_off
+--   Linux   : <front-end Rime user dir>/tts_queue / .../tts_off
 -- (On macOS and Linux the queue lives *inside* the Rime user directory so that it
 --  keeps working even if the front end runs sandboxed.)
+local function exists(path)
+  -- os.rename(dir, dir) succeeds on POSIX for an existing directory; the
+  -- io.open fallback covers file paths on every platform.
+  if os.rename(path, path) then
+    return true
+  end
+  local f = io.open(path, "r")
+  if f then
+    f:close()
+    return true
+  end
+  return false
+end
+
+local function first_existing(paths, fallback)
+  for _, p in ipairs(paths) do
+    if exists(p) then
+      return p
+    end
+  end
+  return fallback
+end
+
+local function is_linux()
+  local f = io.open("/proc/version", "r")
+  if f then
+    f:close()
+    return true
+  end
+  f = io.open("/etc/os-release", "r")
+  if f then
+    f:close()
+    return true
+  end
+  return false
+end
+
 local function default_base()
   if IS_WIN then
     return HOME
   end
-  return HOME .. SEP .. "Library" .. SEP .. "Rime"   -- Squirrel / macOS
+  -- Same override as the reader/panel: the Rime *user* directory.
+  local override = os.getenv("RIME_USER_DIR")
+  if override and override ~= "" then
+    return override
+  end
+  if is_linux() then
+    local data_home   = os.getenv("XDG_DATA_HOME")   or (HOME .. SEP .. ".local" .. SEP .. "share")
+    local config_home = os.getenv("XDG_CONFIG_HOME") or (HOME .. SEP .. ".config")
+    local candidates = {
+      data_home   .. SEP .. "fcitx5" .. SEP .. "rime",  -- fcitx5-rime (most common)
+      config_home .. SEP .. "ibus"   .. SEP .. "rime",  -- ibus-rime
+      config_home .. SEP .. "fcitx"  .. SEP .. "rime",  -- fcitx4-rime
+      data_home   .. SEP .. "fcitx"  .. SEP .. "rime",
+    }
+    return first_existing(candidates, candidates[1])
+  end
+  return HOME .. SEP .. "Library" .. SEP .. "Rime"     -- Squirrel / macOS
 end
 
 local BASE      = default_base()

@@ -14,5 +14,9 @@ desktop.ini
 .vscode/
 .idea/
 
+# Python (Linux reader / tests)
+__pycache__/
+*.py[cod]
+
 # macOS build output
 bin/

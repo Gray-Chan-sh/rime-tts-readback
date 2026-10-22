@@ -222,6 +222,6 @@ macOS 直接喂 `AVSpeechUtterance`，不需要。
 
 ## 跨平台
 
-`rime/rime.lua`、队列格式和配置键在 Windows / macOS 之间共享；Windows 还有哪些没对齐
-（逐位数字、逐字母英文、分开的开关），以及 Linux 还缺什么，见
-[../DEVELOPING.md](../DEVELOPING.md)。
+`rime/rime.lua`、队列格式和配置键在 Windows / macOS / Linux 之间共享。
+Windows 已完成逐位数字、逐字母英文与分开的开关；Linux 实现见
+[../linux/README.md](../linux/README.md)，平台对齐清单见 [../DEVELOPING.md](../DEVELOPING.md)。

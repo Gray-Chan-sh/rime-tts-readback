@@ -12,8 +12,10 @@ Built and tested on **Weasel / 小狼毫 0.17.4** (librime 1.13.1) with a Chines
 (`Microsoft Huihui Desktop`).
 
 On macOS it runs on **Squirrel / 鼠须管** with the system voice (`Tingting`) — see
-[macos/README.md](macos/README.md). Both platforms share the same Lua reporter; only the
-reader is written per platform.
+[macos/README.md](macos/README.md). On Linux it supports **fcitx5-rime / ibus-rime /
+fcitx4-rime** with speech-dispatcher or espeak-ng — see [linux/README.md](linux/README.md).
+All three share the same Lua reporter and the same `config.json` semantics; only the reader
+and the control panel are written per platform.
 
 ## Platforms
 
@@ -21,7 +23,7 @@ reader is written per platform.
 |---|---|---|
 | Windows 10/11 (Weasel / 小狼毫) | ✅ implemented and tested | this document |
 | macOS 13+ (Squirrel / 鼠须管) | ✅ implemented and tested | [macos/README.md](macos/README.md) |
-| Linux (ibus-rime / fcitx5-rime) | 🚧 not implemented | only `rime.lua` is reusable; see [DEVELOPING.md](DEVELOPING.md) |
+| Linux (fcitx5-rime / ibus-rime / fcitx4-rime) | ✅ implemented (verified in WSL; tray/hotkey need X11) | [linux/README.md](linux/README.md) |
 
 Architecture, queue protocol, config keys and the **platform parity checklist**:
 [DEVELOPING.md](DEVELOPING.md).
@@ -55,7 +57,8 @@ so every keystroke of `c f g f` is announced. This project only listens to Rime'
 > The diagram shows the Windows path. The macOS build shares the first half (`rime.lua` →
 > queue file) and replaces the second half with a resident `AVSpeechSynthesizer`: there is no
 > SAPI padding and no `SoundPlayer`, so no WAV rendering, silence trimming or peak
-> normalisation is needed. See [macos/README.md](macos/README.md).
+> normalisation is needed. See [macos/README.md](macos/README.md). The Linux build also shares
+> the queue and speaks through `spd-say` / `espeak-ng`; see [linux/README.md](linux/README.md).
 
 ### The latency trick
 
@@ -110,8 +113,9 @@ default volume, with no clipping.
   right path separator).
   - **Squirrel / 鼠须管**: the reader and control panel live in
     [macos/](macos/README.md).
-  - **ibus-rime / fcitx5-rime**: only the Lua half is reusable today; path detection and a
-    reader are still missing. See the Linux checklist in [DEVELOPING.md](DEVELOPING.md).
+  - **ibus-rime / fcitx5-rime / fcitx4-rime**: the Rime user directory is auto-detected (or
+    set `RIME_USER_DIR`); reader, control panel, tray and global hotkey live in
+    [linux/README.md](linux/README.md).
 
 ### Voice
 
@@ -146,6 +150,25 @@ voices. The panel's **刷新检测 (Refresh)** button reports the same facts.
   binaries; no Xcode needed at runtime.
 - Voice: the built-in `Tingting` (zh-CN); `rime-tts voices` lists them all.
 - Self-check: `rime-tts check`. Full guide: [macos/README.md](macos/README.md).
+
+### Linux
+
+- **Python 3.8+** (standard library only); the control panel needs Tk (`python3-tk` on
+  Debian/Ubuntu, `python3-tkinter` on Fedora).
+- A Rime front end **with librime-lua**: fcitx5-rime, ibus-rime or fcitx4-rime.
+- **TTS**: `speech-dispatcher` (`spd-say`) is preferred, with `espeak-ng` / `espeak` as the
+  fallback. On Debian/Ubuntu:
+
+  ```sh
+  sudo apt install speech-dispatcher espeak-ng python3-tk
+  ```
+
+- Optional: `wmctrl` (list running programs in the panel), `notify-send` (tray notifications),
+  `xdotool` or `xprop` (app filter / foreground window).
+- **X11** is required for the tray (GTK3 `StatusIcon`) and the global hotkey. On Wayland the
+  tray may not show, the hotkey is skipped and the app filter has no effect (reading continues);
+  everything else still works.
+- Self-check: `rime-tts check`. Full guide: [linux/README.md](linux/README.md).
 
 ---
 
@@ -194,6 +217,19 @@ into `~/Library/Rime/` and creates `~/Library/Rime/tts_queue/`. Without `--patch
 **部署到 Rime** button in the control panel does the same.
 Details: [macos/README.md](macos/README.md).
 
+### Linux
+
+```sh
+cd linux
+./install.sh --patch --tray    # install + patch schemas + start reader + tray icon
+```
+
+`install.sh` installs into `~/.rime-tts-readback/`, auto-detects the fcitx5-rime / ibus-rime /
+fcitx4-rime user directory (or use `--rime-dir` / `RIME_USER_DIR`), copies `rime.lua` there and
+creates `tts_queue/`. Common flags: `--patch`, `--no-start`, `--tray`, `--panel`,
+`--autostart`, `--prefix`. Skip `--patch` if you prefer to click **安装 / 接管** in the panel.
+Details: [linux/README.md](linux/README.md).
+
 ---
 
 ## Usage
@@ -207,6 +243,8 @@ Details: [macos/README.md](macos/README.md).
 
 On macOS the equivalents are `rime-tts off/on/stop/start`, the **登录时自动启动** item and
 `uninstall.sh`.
+On Linux they are the same `rime-tts off/on/stop/start`, plus `panel` (control panel), `tray`,
+`autostart on/off` and `shutdown` (stops tray, panel and reader in one go).
 
 ## Uninstall
 
@@ -234,8 +272,8 @@ does everything without editing files by hand:
 - **仅重新部署** — runs a Rime redeploy on its own.
 - **Parameters** — voice (picked from the installed SAPI voices, with a preview button),
   `Rate`, `BreakMs`, `IdleMs`, `MaxWaitMs`, `Threshold`, `PadMs`, `Volume`, `CharByChar`,
-  `IncludeAscii`, saved to `%USERPROFILE%\Rime_tts_config.json`; the reader hot-reloads it
-  (~1 s, no restart needed).
+  `ReadDigits`, `ReadEnglish`, saved to `%USERPROFILE%\Rime_tts_config.json`; the reader
+  hot-reloads it (~1 s, no restart needed).
 - **Tray icon** — a colour-coded dot in the notification area shows whether readback is
   available (green = available, orange = not ready, grey = disabled / not installed).
   Minimizing or closing the window hides it to the tray; click the icon to restore,
@@ -284,6 +322,28 @@ The panel is part of the same binary (`main.swift` + `RimeTtsMenuBar.swift` +
 There are no `Threshold` / `PadMs` / `BreakMs` controls: those belong to the Windows WAV
 rendering path, and macOS feeds `AVSpeechUtterance` directly.
 
+### Linux control panel and tray
+
+`rime-tts panel` opens the Tk control panel; `rime-tts tray` starts the GTK3 tray icon (both are
+subcommands of `rime-tts`, and after installing you can also launch **Rime 回读** from the
+application menu):
+
+- detect, install / take over, redeploy, mute, start/stop the reader, remove, clear the queue,
+  open the Rime directory;
+- voice picker with preview, rate, volume, grouping window, max wait, char-by-char, read digits,
+  read English;
+- program filter (all / only / except) with a one-click list of currently running window classes
+  (X11 + `wmctrl`);
+- launch at login and an X11 global mute hotkey (default `ctrl+alt+r`);
+- open log/config, check report, about;
+- every change is written to `config.json` and hot-reloaded by the reader within ~1 s.
+
+The tray menu has open panel, mute, reader toggle, preview, redeploy, clear queue, open
+log/config, about and quit. GNOME 3.26+ does not show legacy tray icons by default; use the panel
+or install an AppIndicator extension. Under Wayland, `Gtk.StatusIcon`, `XGrabKey` and window-class
+enumeration are unavailable and degrade independently: the panel still works, and mute remains
+available through `rime-tts on/off` or the `tts_off` flag.
+
 ## Configuration
 
 Edit the parameters at the top of `windows\Rime_tts_watcher.ps1`, then restart the watcher.
@@ -299,10 +359,19 @@ and the reader hot-reloads it.)
 | `-Threshold` / `-PadMs` | `180` / `15` | silence detection threshold and padding |
 | `-Volume` | `100` | 0..200, affects this app only; the peak is normalised to 90% first (≈2.4× louder than raw SAPI), >100 clips |
 | `-CharByChar` | `false` | `true` = per-character (characters separated by a comma pause, ~0.4 s each, slower); `false` = whole phrase |
-| `-IncludeAscii` | `true` | also speak ASCII letters/digits |
+| `-ReadDigits` | `true` | speak ASCII digits (one by one); when off, digits are skipped only |
+| `-ReadEnglish` | `true` | speak ASCII letters (spelled out); when off, letters are skipped only |
+| `-IncludeAscii` | `true` | legacy master switch; used as the default for `-ReadDigits` / `-ReadEnglish` when those are not given |
 | `-AppFilterMode` / `-AppFilterList` | `all` / empty | program filter: `all` / `only` / `except` |
 
-The log lives at `%USERPROFILE%\Rime_tts_watcher.log` (rotated at 1 MB).
+macOS and Linux read the same `config.json` (same keys: `Voice`, `Rate`, `IdleMs`, `MaxWaitMs`,
+`Volume`, `CharByChar`, `ReadDigits`, `ReadEnglish`, `AppFilterMode`, `AppFilterList`, `HotKey`) at
+`~/.rime-tts-readback/config.json`. Writes also include the compatibility key
+`IncludeAscii = ReadDigits && ReadEnglish` so older readers keep working; when reading an older
+config without the two new keys they fall back to `IncludeAscii`.
+
+The log lives at `%USERPROFILE%\Rime_tts_watcher.log` (rotated at 1 MB); on Linux/macOS it is
+`~/.rime-tts-readback/watcher.log`.
 
 ## Layout
 
@@ -328,16 +397,31 @@ rime-tts-readback/
 │  ├─ rime-tts                          # command line
 │  ├─ build.sh / install.sh / uninstall.sh
 │  └─ README.md
+├─ linux/                               # Linux implementation (fcitx5-rime / ibus-rime / fcitx4-rime)
+│  ├─ rime_tts_common.py                # paths, config, queue, patch, autostart
+│  ├─ rime_tts_text.py                  # text filtering / digit & letter spelling
+│  ├─ rime_tts_tts.py                   # speech-dispatcher / espeak-ng back ends
+│  ├─ rime_tts_reader.py                # resident reader
+│  ├─ rime_tts_panel.py                 # Tk control panel
+│  ├─ rime_tts_tray.py                  # optional GTK3 tray
+│  ├─ rime_tts_hotkey.py                # X11 global hotkey
+│  ├─ rime_tts_control.py               # actions shared by CLI / panel / tray
+│  ├─ rime-tts                          # command line entry point
+│  ├─ install.sh / uninstall.sh
+│  ├─ tests/                            # unittest (config, patch, text, queue)
+│  └─ README.md
 ├─ icons/
 │  ├─ rime-tts-readback.ico             # app icon (sound waves + keyboard)
+│  ├─ rime-tts-readback.png             # Linux panel / application menu
 │  ├─ tray-ok.ico / tray-warn.ico / tray-off.ico
+│  └─ tray-ok.png / tray-warn.png / tray-off.png
 ├─ tools/
 │  ├─ make-icons.ps1                    # regenerates icons/ (GDI+, multi-size DIB)
 │  ├─ build-release.ps1                 # portable zip  -> dist/rime-tts-readback-<v>.zip
 │  └─ build-exe.ps1                     # single-file exe -> dist/RimeTtsReadback-<v>.exe
-├─ .github/workflows/build.yml          # CI: Windows zip/exe + macOS binary build check
+├─ .github/workflows/build.yml          # CI: Windows zip/exe, macOS compile, Linux tests
 ├─ install.ps1 / uninstall.ps1
-├─ DEVELOPING.md                        # architecture, queue protocol, Windows/Linux TODO
+├─ DEVELOPING.md                        # architecture, queue protocol, parity checklist
 └─ README.md / README.en.md
 ```
 
@@ -372,6 +456,15 @@ rime-tts-readback/
   a resident `AVSpeechSynthesizer`; use `rime-tts start` if you kill it. The two macOS binaries
   are compiled locally and **unsigned** — fine for personal use, code signing + notarisation
   needed to distribute them.
+- On Linux the tray relies on GTK3 `Gtk.StatusIcon` (legacy tray). GNOME 3.26+ hides it by
+  default; install an AppIndicator extension or use `rime-tts panel`.
+- On Linux the global hotkey and the app filter require **X11**. Under Wayland the hotkey is
+  skipped and the foreground program cannot be identified (so no filtering is applied and reading
+  continues); mute still works via `rime-tts on/off`, the panel or the `tts_off` flag.
+- On Linux speech goes through `spd-say` or `espeak-ng`; voices/rates depend on the installed
+  engine and do not map to SAPI / `AVSpeechSynthesizer` numbers. Tune with the panel's preview.
+- `pip`/virtualenvs work, but the installer only needs the system `python3`; without Tk the panel
+  is unavailable while the CLI and reader keep working.
 
 ## Build & release
 
@@ -389,8 +482,9 @@ powershell -ExecutionPolicy Bypass -File tools\build-exe.ps1       # dist\RimeTt
   tools required). They are unsigned, shipped as source and built locally.
 
 CI: `.github/workflows/build.yml` builds the Windows zip + exe on every push to `main`, compiles
-the macOS binaries on `macos-14`, uploads the artifacts, and — for `v*` tags — attaches the
-Windows assets to the GitHub release.
+the macOS binaries on `macos-14`, runs Linux `py_compile`, unit tests plus CLI/install smoke tests
+on `ubuntu-latest`, uploads the artifacts, and — for `v*` tags — attaches the Windows assets to
+the GitHub release.
 
 ## License
 

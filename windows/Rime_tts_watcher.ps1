@@ -20,10 +20,25 @@ param(
   [int]$PadMs         = 15,
   [int]$Volume        = 100,    # 0..200, applied to the rendered samples
   [bool]$CharByChar   = $false, # true = separate the characters with a comma pause (slower)
-  [bool]$IncludeAscii = $true,  # read ASCII letters and digits too
+  [bool]$IncludeAscii = $true,  # legacy master switch: ASCII letters and digits
+  [Nullable[bool]]$ReadDigits  = $null, # $null = fall back to -IncludeAscii
+  [Nullable[bool]]$ReadEnglish = $null, # $null = fall back to -IncludeAscii
   [string]$AppFilterMode = 'all', # 'all' | 'only' | 'except'
-  [string[]]$AppFilterList = @()
+  [string[]]$AppFilterList = @(),
+  [switch]$SelfTest             # print the text transformations and exit (CI / tuning)
 )
+
+# Effective switches used by ReadableChars. The macOS reader (and the config
+# contract) separates "digits" from "letters"; IncludeAscii is only the legacy
+# master switch, so a missing new key keeps the old meaning.
+$script:EffReadDigits  = if ($null -ne $ReadDigits)  { [bool]$ReadDigits }  else { [bool]$IncludeAscii }
+$script:EffReadEnglish = if ($null -ne $ReadEnglish) { [bool]$ReadEnglish } else { [bool]$IncludeAscii }
+function Update-EffectiveSwitches {
+  if ($null -ne $script:ReadDigits)  { $script:EffReadDigits  = [bool]$script:ReadDigits }
+  else                               { $script:EffReadDigits  = [bool]$IncludeAscii }
+  if ($null -ne $script:ReadEnglish) { $script:EffReadEnglish = [bool]$script:ReadEnglish }
+  else                               { $script:EffReadEnglish = [bool]$IncludeAscii }
+}
 
 # ---- config file (written by the GUI); hot-reloaded whenever it changes ----
 $ConfigFile = Join-Path $env:USERPROFILE 'Rime_tts_config.json'
@@ -32,11 +47,17 @@ function Import-Config {
   if (-not (Test-Path -LiteralPath $ConfigFile)) { return $false }
   try {
     $cfg = Get-Content -LiteralPath $ConfigFile -Raw -Encoding UTF8 | ConvertFrom-Json
+    # Reset the two optional keys every time so a removed key falls back to
+    # IncludeAscii instead of keeping a stale value from the previous load.
+    $script:ReadDigits  = $null
+    $script:ReadEnglish = $null
     foreach ($n in @('Voice','Rate','IdleMs','MaxWaitMs','Threshold','PadMs',
-                     'Volume','CharByChar','IncludeAscii','AppFilterMode','AppFilterList')) {
+                     'Volume','CharByChar','IncludeAscii','ReadDigits','ReadEnglish',
+                     'AppFilterMode','AppFilterList')) {
       $v = $cfg.$n
       if ($null -ne $v) { Set-Variable -Name $n -Value $v -Scope script }
     }
+    Update-EffectiveSwitches
     return $true
   } catch { return $false }
 }
@@ -102,13 +123,25 @@ function Pending {
 function ReadableChars([string]$txt) {
   $out = ''
   foreach ($ch in $txt.ToCharArray()) {
-    if ([char]::IsWhiteSpace($ch)) { continue }
+    if ([char]::IsWhiteSpace($ch)) {
+      # keep one word break between ASCII letters ("hello world"), but not
+      # around Chinese text where a space is meaningless
+      if ($out.Length -gt 0) {
+        $last = $out[$out.Length - 1]
+        if ($last -ne ' ' -and [int]$last -lt 128 -and [char]::IsLetter($last)) {
+          $out += ' '
+        }
+      }
+      continue
+    }
     if (-not [char]::IsLetterOrDigit($ch)) { continue }
-    $u = [int][char]$ch
-    if (-not $IncludeAscii -and $u -lt 128 -and ([char]::IsLetter($ch) -or [char]::IsNumber($ch))) { continue }
+    if ([int][char]$ch -lt 128) {
+      if ([char]::IsLetter($ch) -and -not $script:EffReadEnglish) { continue }
+      if ([char]::IsNumber($ch) -and -not $script:EffReadDigits)  { continue }
+    }
     $out += $ch
   }
-  return $out
+  return $out.Trim()
 }
 
 function Build-Ssml([string]$readable) {
@@ -123,9 +156,30 @@ function Build-Ssml([string]$readable) {
     }
     $body = $parts -join $comma
   } else {
-    $body = [System.Security.SecurityElement]::Escape($readable)
+    # Spell out ASCII letter/digit runs: "abc12" -> "a b c 1 2". This keeps the
+    # voice from turning a run into a word or a number (same rule as macOS).
+    $sb = New-Object System.Text.StringBuilder
+    $prevAscii = $false
+    foreach ($ch in $readable.ToCharArray()) {
+      $ascii = ([int][char]$ch -lt 128) -and [char]::IsLetterOrDigit($ch)
+      if ($ascii -and $prevAscii) { [void]$sb.Append(' ') }
+      [void]$sb.Append($ch)
+      $prevAscii = $ascii
+    }
+    $body = [System.Security.SecurityElement]::Escape($sb.ToString())
   }
   return "<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='zh-CN'>$body</speak>"
+}
+
+# ASCII-only batches (letters/digits typed in ASCII mode) arrive one key at a
+# time; they get a longer grouping window, like the macOS reader.
+function Test-AsciiOnly([string]$s) {
+  if ($s -eq '') { return $false }
+  foreach ($ch in $s.ToCharArray()) {
+    if ([int][char]$ch -ge 128) { return $false }
+    if (-not ([char]::IsLetterOrDigit($ch) -or $ch -eq ' ')) { return $false }
+  }
+  return $true
 }
 
 function Get-ForegroundProcessName {
@@ -252,7 +306,28 @@ try {
     Where-Object { $_.Extension -in '.txt', '.tmp' } | Remove-Item -Force -ErrorAction SilentlyContinue
 } catch { }
 
-Log "watcher started voice=$Voice rate=$Rate charByChar=$CharByChar vol=$Volume idle=${IdleMs}ms appFilter=$AppFilterMode [$($AppFilterList -join ',')]"
+if ($SelfTest) {
+  # No audio: only the text pipeline. Kept dependency-free so CI can run it.
+  # (ASCII-only source: build the Chinese samples from code points.)
+  $zh1 = [string]([char]0x5BF9) + [char]0x4E8E                       # "dui yu"
+  $zh2 = [string]([char]0x7B2C) + '12' + [char]0x7AE0                # "di 12 zhang"
+  $zh3 = [string]([char]0x4F60) + [char]0x597D + ' abc 12'           # "ni hao abc 12"
+  $samples = @($zh1, 'abc123', 'hello world', $zh2, $zh3)
+  foreach ($s in $samples) {
+    $r = ReadableChars $s
+    "in   : [$s]"
+    "read : [$r]"
+    "ssml : $(Build-Ssml $r)"
+    ''
+  }
+  "asciiOnly 'abc123' = $(Test-AsciiOnly 'abc123')"
+  $zhMix = [string]([char]0x4E2D) + [char]0x6587
+  "asciiOnly 'abc$zhMix' = $(Test-AsciiOnly ('abc' + $zhMix))"
+  "switches digits=$script:EffReadDigits english=$script:EffReadEnglish"
+  exit 0
+}
+
+Log "watcher started voice=$Voice rate=$Rate charByChar=$CharByChar digits=$script:EffReadDigits english=$script:EffReadEnglish vol=$Volume idle=${IdleMs}ms appFilter=$AppFilterMode [$($AppFilterList -join ',')]"
 
 $buffer = ''; $since = $null; $lastAdd = $null; $fgProc = ''
 $lastSweep = [DateTime]::UtcNow
@@ -268,7 +343,7 @@ while ($true) {
         $script:CfgStamp = $stamp
         if (Import-Config) {
           Apply-VoiceRate
-          Log "config reloaded: voice=$Voice rate=$Rate charByChar=$CharByChar vol=$Volume idle=${IdleMs}ms appFilter=$AppFilterMode [$($AppFilterList -join ',')]"
+          Log "config reloaded: voice=$Voice rate=$Rate charByChar=$CharByChar digits=$script:EffReadDigits english=$script:EffReadEnglish vol=$Volume idle=${IdleMs}ms appFilter=$AppFilterMode [$($AppFilterList -join ',')]"
         }
       }
     }
@@ -308,7 +383,17 @@ while ($true) {
   $quiet  = if ($lastAdd) { ($now - $lastAdd).TotalMilliseconds } else { 9999 }
   $waited = if ($since)   { ($now - $since).TotalMilliseconds }   else { 0 }
 
-  if ($quiet -ge $IdleMs -or $waited -ge $MaxWaitMs) {
+  # ASCII batches arrive one keypress at a time; widen the window so "abc123"
+  # becomes one utterance instead of one SAPI call per character.
+  $asciiOnly = Test-AsciiOnly $buffer
+  $idle = $IdleMs
+  $maxWait = $MaxWaitMs
+  if ($asciiOnly) {
+    $idle += 200
+    if ($maxWait -lt 1200) { $maxWait = 1200 }
+  }
+
+  if ($quiet -ge $idle -or $waited -ge $maxWait) {
     $rawNow = $buffer
     $procNow = $fgProc
     $buffer = ''; $since = $null; $lastAdd = $null; $fgProc = ''
