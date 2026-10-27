@@ -23,7 +23,7 @@ import AppKit
 import AVFoundation
 import Darwin
 
-let APP_VERSION = "1.1.0"
+let APP_VERSION = "1.1.1"
 
 // ---------------------------------------------------------------- paths
 

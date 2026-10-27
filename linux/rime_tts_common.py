@@ -17,7 +17,7 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
-APP_VERSION = "1.1.0"
+APP_VERSION = "1.1.1"
 REPO_URL = "https://github.com/Gray-Chan-sh/rime-tts-readback"
 
 HOME = Path(os.environ.get("HOME") or Path.home())
